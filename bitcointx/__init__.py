@@ -19,7 +19,11 @@ import bitcointx.core
 __version__ = '0.10.4.dev0'
 
 
-class MainParams(bitcointx.core.CoreMainParams):
+class _ParamsTag():
+    pass
+
+
+class MainParams(bitcointx.core.CoreMainParams, _ParamsTag):
     RPC_PORT = 8332
     BASE58_PREFIXES = {'PUBKEY_ADDR':0,
                        'SCRIPT_ADDR':5,
@@ -29,20 +33,23 @@ class MainParams(bitcointx.core.CoreMainParams):
     BECH32_HRP = 'bc'
 
 
-class ElementsSidechainParams(bitcointx.core.CoreElementsSidechainParams):
+class ElementsSidechainParams(bitcointx.core.CoreElementsSidechainParams, _ParamsTag):
     RPC_PORT = 7041
     BASE58_PREFIXES = {'PUBKEY_ADDR' : 235,
                        'SCRIPT_ADDR' : 75,
                        'BLINDED_ADDR': b'\x04',
                        'BLINDED_PUBKEY_ADDR': b'\x04\xEB',
                        'BLINDED_SCRIPT_ADDR': b'\x04\x4B',
+
+                       # Note: these are the same as for Bitcoin testnet
                        'SECRET_KEY'  : 239,
                        'EXTENDED_PUBKEY': b'\x04\x35\x87\xCF',
                        'EXTENDED_PRIVKEY': b'\x04\x35\x83\x94'}
+
     BECH32_HRP = None
 
 
-class TestNetParams(bitcointx.core.CoreTestNetParams):
+class TestNetParams(bitcointx.core.CoreTestNetParams, _ParamsTag):
     RPC_PORT = 18332
     BASE58_PREFIXES = {'PUBKEY_ADDR':111,
                        'SCRIPT_ADDR':196,
@@ -52,7 +59,7 @@ class TestNetParams(bitcointx.core.CoreTestNetParams):
     BECH32_HRP = 'tb'
 
 
-class RegTestParams(bitcointx.core.CoreRegTestParams):
+class RegTestParams(bitcointx.core.CoreRegTestParams, _ParamsTag):
     RPC_PORT = 18443
     BASE58_PREFIXES = {'PUBKEY_ADDR':111,
                        'SCRIPT_ADDR':196,
@@ -99,15 +106,13 @@ def SelectParams(name):
     Default chain is 'mainnet'
     """
     global params
+
     bitcointx.core._SelectCoreParams(name)
-    if name == 'mainnet':
-        params = bitcointx.core.coreparams = MainParams()
-    if name == 'elements-sidechain':
-        params = bitcointx.core.coreparams = ElementsSidechainParams()
-    elif name == 'testnet':
-        params = bitcointx.core.coreparams = TestNetParams()
-    elif name == 'regtest':
-        params = bitcointx.core.coreparams = RegTestParams()
+
+    for cls in _ParamsTag.__subclasses__():
+        if name == cls.NAME:
+            params = cls()
+            break
     else:
         raise ValueError('Unknown chain %r' % name)
 
