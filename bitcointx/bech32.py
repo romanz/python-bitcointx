@@ -31,7 +31,8 @@ class CBech32Data(bytes):
     def __new__(cls, s):
         """from bech32 addr to """
         if bitcointx.params.BECH32_HRP is None:
-            raise Bech32Error('Bech32 is not supported')
+            raise Bech32Error(
+                'Bech32 support is disabled in current chain params')
         witver, data = decode(bitcointx.params.BECH32_HRP, s)
         if witver is None and data is None:
             raise Bech32Error('Bech32 decoding error')
