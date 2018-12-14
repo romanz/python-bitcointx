@@ -165,9 +165,9 @@ class CBase58PrefixedData(CBase58RawData):
 
     @classmethod
     def from_bytes(cls, data, prefix=None):
-        if prefix is not None and len(cls.base58_prefix) != len(prefix):
+        if prefix is not None and len(prefix) < len(cls.base58_prefix):
             raise UnexpectedBase58PrefixError(
-                'base58 prefix length must be {}'.format(len(cls.base58_prefix)))
+                'base58 prefix length must be >= {}'.format(len(cls.base58_prefix)))
         self = super(CBase58PrefixedData, cls).from_bytes(data)
         if cls.base58_prefix_check_always:
             cls.check_base58_prefix_correct(prefix)

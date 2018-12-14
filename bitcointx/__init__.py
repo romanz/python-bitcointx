@@ -29,6 +29,19 @@ class MainParams(bitcointx.core.CoreMainParams):
     BECH32_HRP = 'bc'
 
 
+class ElementsSidechainParams(bitcointx.core.CoreElementsSidechainParams):
+    RPC_PORT = 7041
+    BASE58_PREFIXES = {'PUBKEY_ADDR' : 235,
+                       'SCRIPT_ADDR' : 75,
+                       'BLINDED_ADDR': b'\x04',
+                       'BLINDED_PUBKEY_ADDR': b'\x04\xEB',
+                       'BLINDED_SCRIPT_ADDR': b'\x04\x4B',
+                       'SECRET_KEY'  : 239,
+                       'EXTENDED_PUBKEY': b'\x04\x35\x87\xCF',
+                       'EXTENDED_PRIVKEY': b'\x04\x35\x83\x94'}
+    BECH32_HRP = None
+
+
 class TestNetParams(bitcointx.core.CoreTestNetParams):
     RPC_PORT = 18332
     BASE58_PREFIXES = {'PUBKEY_ADDR':111,
@@ -89,6 +102,8 @@ def SelectParams(name):
     bitcointx.core._SelectCoreParams(name)
     if name == 'mainnet':
         params = bitcointx.core.coreparams = MainParams()
+    if name == 'elements-sidechain':
+        params = bitcointx.core.coreparams = ElementsSidechainParams()
     elif name == 'testnet':
         params = bitcointx.core.coreparams = TestNetParams()
     elif name == 'regtest':

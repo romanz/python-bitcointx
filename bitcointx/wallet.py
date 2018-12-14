@@ -124,17 +124,18 @@ class CBase58BitcoinAddress(bitcointx.base58.CBase58PrefixedData, CBitcoinAddres
 
         nVersion = prefix[0]
 
-        self = super(CBase58BitcoinAddress, cls).from_bytes(data, prefix)
-
+        matching_class = cls
         if cls not in CBase58BitcoinAddress.__subclasses__():
             for subclass in CBase58BitcoinAddress.__subclasses__():
                 prefix = subclass.base58_prefix
                 if prefix is not None and nVersion == prefix[0]:
-                    self.__class__ = subclass
+                    matching_class, data, prefix = subclass._base58_submatch(data, prefix)
                     break
             else:
                 raise CBitcoinAddressError('Version %d not a recognized Bitcoin Address' % nVersion)
 
+        self = super(CBase58BitcoinAddress, cls).from_bytes(data, prefix)
+        self.__class__ = matching_class
         return self
 
     @classmethod
@@ -156,6 +157,10 @@ class CBase58BitcoinAddress(bitcointx.base58.CBase58PrefixedData, CBitcoinAddres
             pass
 
         raise CBitcoinAddressError('scriptPubKey not a valid base58-encoded address')
+
+    @classmethod
+    def _base58_submatch(cls, data, prefix):
+        return cls, data, prefix
 
 
 class P2SHBitcoinAddress(CBase58BitcoinAddress):
@@ -272,6 +277,60 @@ class P2PKHBitcoinAddress(CBase58BitcoinAddress):
 
     def to_redeemScript(self):
         return self.to_scriptPubKey()
+
+
+class BlindedBitcoinAddress(CBase58BitcoinAddress):
+
+    @classmethod
+    def _base58_submatch(cls, data, prefix):
+        for subclass in cls.__subclasses__():
+            assert len(subclass.base58_prefix) == 2
+            assert prefix == subclass.base58_prefix[:1]
+            if data[0] == subclass.base58_prefix[1]:
+                return subclass, data[1:], subclass.base58_prefix
+        raise CBitcoinAddressError('Sub-version %d not a recognized blinded Bitcoin Address' % data[0])
+
+    @classmethod
+    def from_unblinded(cls, unblinded_adr, blinding_pubkey):
+        """Convert unblinded address to blinded
+
+        Raises CBitcoinAddressError if blinding_pubkey is invalid
+
+        unblinded_adr can be string or CBase58BitcoinAddress instance
+        blinding_pubkey must be a bytes instance
+        """
+        if not isinstance(blinding_pubkey, bytes):
+            raise TypeError('blinding_pubkey must be bytes instance; got %r' % blinding_pubkey.__class__)
+        if not isinstance(blinding_pubkey, bitcointx.core.key.CPubKey):
+            blinding_pubkey = bitcointx.core.key.CPubKey(blinding_pubkey)
+        if not blinding_pubkey.is_fullyvalid:
+            raise CBitcoinAddressError('invalid blinding pubkey')
+
+        if not isinstance(unblinded_adr, CBase58BitcoinAddress):
+            unblinded_adr = CBase58BitcoinAddress(unblinded_adr)
+
+        if len(cls.base58_prefix) > 1 and unblinded_adr.prefix != cls.base58_prefix[1:]:
+            raise CBitcoinAddressError('cannot create {} with unblinded {}'
+                                       .format(cls, unblinded_adr.__class__.__name__))
+
+        return CBase58BitcoinAddress.from_bytes(
+            unblinded_adr.base58_prefix + blinding_pubkey + unblinded_adr,
+            cls.base58_prefix[0:1])
+
+    def to_unblinded(self):
+        return CBase58BitcoinAddress.from_bytes(self[33:], self.base58_prefix[1:2])
+
+    @property
+    def blinding_pubkey(self):
+        return bitcointx.core.key.CPubKey(self[0:33])
+
+
+class BlindedP2PKHBitcoinAddress(BlindedBitcoinAddress):
+    pass
+
+
+class BlindedP2SHBitcoinAddress(BlindedBitcoinAddress):
+    pass
 
 
 class P2WSHBitcoinAddress(CBech32BitcoinAddress):
@@ -414,6 +473,9 @@ class CBitcoinExtKey(bitcointx.base58.CBase58PrefixedData, bitcointx.core.key.CE
 _Base58PrefixMap = {
     P2PKHBitcoinAddress: 'PUBKEY_ADDR',
     P2SHBitcoinAddress: 'SCRIPT_ADDR',
+    BlindedBitcoinAddress: 'BLINDED_ADDR',
+    BlindedP2PKHBitcoinAddress: 'BLINDED_PUBKEY_ADDR',
+    BlindedP2SHBitcoinAddress: 'BLINDED_SCRIPT_ADDR',
     CBitcoinSecret: 'SECRET_KEY',
     CBitcoinExtKey: 'EXTENDED_PRIVKEY',
     CBitcoinExtPubKey: 'EXTENDED_PUBKEY',
@@ -452,6 +514,9 @@ __all__ = (
         'P2PKHBitcoinAddress',
         'P2WSHBitcoinAddress',
         'P2WPKHBitcoinAddress',
+        'BlindedBitcoinAddress',
+        'BlindedP2SHBitcoinAddress',
+        'BlindedP2PKHBitcoinAddress',
         'CBitcoinSecretError',
         'CBitcoinSecret',
         'CBitcoinExtKey',

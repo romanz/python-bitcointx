@@ -11,22 +11,17 @@
 
 """Bech32 encoding and decoding"""
 
-import sys
-_bchr = chr
-_bord = ord
-if sys.version > '3':
-    long = int
-    _bchr = lambda x: bytes([x])
-    _bord = lambda x: x
-
 from bitcointx.segwit_addr import encode, decode
 import bitcointx
+
 
 class Bech32Error(Exception):
     pass
 
+
 class Bech32ChecksumError(Bech32Error):
     pass
+
 
 class CBech32Data(bytes):
     """Bech32-encoded data
@@ -35,6 +30,8 @@ class CBech32Data(bytes):
     """
     def __new__(cls, s):
         """from bech32 addr to """
+        if bitcointx.params.BECH32_HRP is None:
+            raise Bech32Error('Bech32 is not supported')
         witver, data = decode(bitcointx.params.BECH32_HRP, s)
         if witver is None and data is None:
             raise Bech32Error('Bech32 decoding error')
