@@ -69,6 +69,13 @@ class Test_COutPoint(unittest.TestCase):
         T(COutPoint(lx('4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b'), 10),
                        '4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b:10')
 
+    def test_immutable(self):
+        """COutPoint shall not be mutable"""
+        outpoint = COutPoint()
+        with self.assertRaises(AttributeError):
+            outpoint.n = 1
+
+
 class Test_CMutableOutPoint(unittest.TestCase):
     def test_GetHash(self):
         """CMutableOutPoint.GetHash() is not cached"""
@@ -92,6 +99,12 @@ class Test_CTxIn(unittest.TestCase):
             self.assertEqual(actual, expected)
         T( CTxIn(),
           'CTxIn(COutPoint(), CScript([]), 0xffffffff)')
+
+    def test_immutable(self):
+        """CTxIn shall not be mutable"""
+        txin = CTxIn()
+        with self.assertRaises(AttributeError):
+            txin.nSequence = 1
 
 class Test_CMutableTxIn(unittest.TestCase):
     def test_GetHash(self):
@@ -151,3 +164,23 @@ class Test_CTransaction(unittest.TestCase):
                         flags.add(SCRIPT_VERIFY_P2SH)
 
                     VerifyScript(tx.vin[i].scriptSig, prevouts[tx.vin[i].prevout], tx, i, flags=flags)
+
+    def test_immutable(self):
+        tx = CTransaction()
+        self.assertFalse(tx.is_coinbase())
+
+        with self.assertRaises(AttributeError):
+            tx.nVersion = 2
+        with self.assertRaises(AttributeError):
+            tx.vin.append(CTxIn())
+
+        mtx = tx.to_mutable()
+        mtx.nVersion = 2
+        mtx.vin.append(CTxIn())
+
+        itx = tx.to_immutable()
+
+        with self.assertRaises(AttributeError):
+            itx.nVersion = 2
+        with self.assertRaises(AttributeError):
+            itx.vin.append(CTxIn())

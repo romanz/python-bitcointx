@@ -73,6 +73,7 @@ class RegTestParams(bitcointx.core.CoreRegTestParams, _ParamsTag):
 However, don't set this directly, use SelectParams() instead so as to set the
 bitcointx.core.params correctly too.
 """
+
 params = MainParams()
 
 
