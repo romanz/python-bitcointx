@@ -23,9 +23,6 @@ a different implementation can be used instead, at your own risk:
 thus better optimized but perhaps less stable.)
 """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-import ssl
-
 try:
     import http.client as httplib
 except ImportError:
@@ -43,7 +40,7 @@ except ImportError:
     import urlparse
 
 import bitcointx
-from bitcointx.core import COIN, x, lx, b2lx, CBlock, CBlockHeader, CTransaction, COutPoint, CTxOut
+from bitcointx.core import COIN, lx, b2lx, CTransaction, COutPoint, CTxOut
 from bitcointx.core.script import CScript
 from bitcointx.wallet import CBitcoinAddress, CBitcoinSecret
 
@@ -420,56 +417,6 @@ class Proxy(BaseProxy):
     def getbestblockhash(self):
         """Return hash of best (tip) block in longest block chain."""
         return lx(self._call('getbestblockhash'))
-
-    def getblockheader(self, block_hash, verbose=False):
-        """Get block header <block_hash>
-
-        verbose - If true a dict is returned with the values returned by
-                  getblockheader that are not in the block header itself
-                  (height, nextblockhash, etc.)
-
-        Raises IndexError if block_hash is not valid.
-        """
-        try:
-            block_hash = b2lx(block_hash)
-        except TypeError:
-            raise TypeError('%s.getblockheader(): block_hash must be bytes; got %r instance' %
-                    (self.__class__.__name__, block_hash.__class__))
-        try:
-            r = self._call('getblockheader', block_hash, verbose)
-        except InvalidAddressOrKeyError as ex:
-            raise IndexError('%s.getblockheader(): %s (%d)' %
-                    (self.__class__.__name__, ex.error['message'], ex.error['code']))
-
-        if verbose:
-            nextblockhash = None
-            if 'nextblockhash' in r:
-                nextblockhash = lx(r['nextblockhash'])
-            return {'confirmations':r['confirmations'],
-                    'height':r['height'],
-                    'mediantime':r['mediantime'],
-                    'nextblockhash':nextblockhash,
-                    'chainwork':x(r['chainwork'])}
-        else:
-            return CBlockHeader.deserialize(unhexlify(r))
-
-
-    def getblock(self, block_hash):
-        """Get block <block_hash>
-
-        Raises IndexError if block_hash is not valid.
-        """
-        try:
-            block_hash = b2lx(block_hash)
-        except TypeError:
-            raise TypeError('%s.getblock(): block_hash must be bytes; got %r instance' %
-                    (self.__class__.__name__, block_hash.__class__))
-        try:
-            r = self._call('getblock', block_hash, False)
-        except InvalidAddressOrKeyError as ex:
-            raise IndexError('%s.getblock(): %s (%d)' %
-                    (self.__class__.__name__, ex.error['message'], ex.error['code']))
-        return CBlock.deserialize(unhexlify(r))
 
     def getblockcount(self):
         """Return the number of blocks in the longest block chain"""

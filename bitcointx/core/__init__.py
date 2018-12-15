@@ -13,7 +13,6 @@
 
 import binascii
 import struct
-import time
 
 from .script import CScript, CScriptWitness, OP_RETURN
 
@@ -490,226 +489,9 @@ class CMutableTransaction(CTransaction):
         return cls(vin, vout, tx.nLockTime, tx.nVersion, tx.wit)
 
 
-class CBlockHeader(ImmutableSerializable):
-    """A block header"""
-    __slots__ = ['nVersion', 'hashPrevBlock', 'hashMerkleRoot', 'nTime', 'nBits', 'nNonce']
-
-    def __init__(self, nVersion=2, hashPrevBlock=b'\x00'*32, hashMerkleRoot=b'\x00'*32, nTime=0, nBits=0, nNonce=0):
-        object.__setattr__(self, 'nVersion', nVersion)
-        assert len(hashPrevBlock) == 32
-        object.__setattr__(self, 'hashPrevBlock', hashPrevBlock)
-        assert len(hashMerkleRoot) == 32
-        object.__setattr__(self, 'hashMerkleRoot', hashMerkleRoot)
-        object.__setattr__(self, 'nTime', nTime)
-        object.__setattr__(self, 'nBits', nBits)
-        object.__setattr__(self, 'nNonce', nNonce)
-
-    @classmethod
-    def stream_deserialize(cls, f):
-        nVersion = struct.unpack(b"<i", ser_read(f, 4))[0]
-        hashPrevBlock = ser_read(f, 32)
-        hashMerkleRoot = ser_read(f, 32)
-        nTime = struct.unpack(b"<I", ser_read(f, 4))[0]
-        nBits = struct.unpack(b"<I", ser_read(f, 4))[0]
-        nNonce = struct.unpack(b"<I", ser_read(f, 4))[0]
-        return cls(nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNonce)
-
-    def stream_serialize(self, f):
-        f.write(struct.pack(b"<i", self.nVersion))
-        assert len(self.hashPrevBlock) == 32
-        f.write(self.hashPrevBlock)
-        assert len(self.hashMerkleRoot) == 32
-        f.write(self.hashMerkleRoot)
-        f.write(struct.pack(b"<I", self.nTime))
-        f.write(struct.pack(b"<I", self.nBits))
-        f.write(struct.pack(b"<I", self.nNonce))
-
-    @staticmethod
-    def calc_difficulty(nBits):
-        """Calculate difficulty from nBits target"""
-        nShift = (nBits >> 24) & 0xff
-        dDiff = float(0x0000ffff) / float(nBits & 0x00ffffff)
-        while nShift < 29:
-            dDiff *= 256.0
-            nShift += 1
-        while nShift > 29:
-            dDiff /= 256.0
-            nShift -= 1
-        return dDiff
-    difficulty = property(lambda self: CBlockHeader.calc_difficulty(self.nBits))
-
-    def __repr__(self):
-        return "%s(%i, lx(%s), lx(%s), %s, 0x%08x, 0x%08x)" % \
-            (self.__class__.__name__, self.nVersion, b2lx(self.hashPrevBlock), b2lx(self.hashMerkleRoot),
-             self.nTime, self.nBits, self.nNonce)
-
-
-class NoWitnessData(Exception):
-    """The block does not have witness data"""
-
-
-class CBlock(CBlockHeader):
-    """A block including all transactions in it"""
-    __slots__ = ['vtx', 'vMerkleTree', 'vWitnessMerkleTree']
-
-    @staticmethod
-    def build_merkle_tree_from_txids(txids):
-        """Build a full CBlock merkle tree from txids
-
-        txids - iterable of txids
-
-        Returns a new merkle tree in deepest first order. The last element is
-        the merkle root.
-
-        WARNING! If you're reading this because you're learning about crypto
-        and/or designing a new system that will use merkle trees, keep in mind
-        that the following merkle tree algorithm has a serious flaw related to
-        duplicate txids, resulting in a vulnerability. (CVE-2012-2459) Bitcoin
-        has since worked around the flaw, but for new applications you should
-        use something different; don't just copy-and-paste this code without
-        understanding the problem first.
-        """
-        merkle_tree = list(txids)
-
-        size = len(txids)
-        j = 0
-        while size > 1:
-            for i in range(0, size, 2):
-                i2 = min(i+1, size-1)
-                merkle_tree.append(Hash(merkle_tree[j+i] + merkle_tree[j+i2]))
-
-            j += size
-            size = (size + 1) // 2
-
-        return merkle_tree
-
-    @staticmethod
-    def build_merkle_tree_from_txs(txs):
-        """Build a full merkle tree from transactions"""
-        txids = [tx.GetTxid() for tx in txs]
-        return CBlock.build_merkle_tree_from_txids(txids)
-
-    def calc_merkle_root(self):
-        """Calculate the merkle root
-
-        The calculated merkle root is not cached; every invocation
-        re-calculates it from scratch.
-        """
-        if not len(self.vtx):
-            raise ValueError('Block contains no transactions')
-        return self.build_merkle_tree_from_txs(self.vtx)[-1]
-
-    @staticmethod
-    def build_witness_merkle_tree_from_txs(txs):
-        """Calculate the witness merkle tree from transactions"""
-        has_witness = False
-        hashes = []
-        for tx in txs:
-            hashes.append(tx.GetHash())
-            has_witness |= tx.has_witness()
-        if not has_witness:
-            raise NoWitnessData
-        hashes[0] = b'\x00' * 32
-        return CBlock.build_merkle_tree_from_txids(hashes)
-
-    def calc_witness_merkle_root(self):
-        """Calculate the witness merkle root
-
-        The calculated merkle root is not cached; every invocation
-        re-calculates it from scratch.
-        """
-        if not len(self.vtx):
-            raise ValueError('Block contains no transactions')
-        return self.build_witness_merkle_tree_from_txs(self.vtx)[-1]
-
-    def get_witness_commitment_index(self):
-        """Find txout # of witness commitment in coinbase
-
-        Return None or an index
-        """
-        if not len(self.vtx):
-            raise ValueError('Block contains no transactions')
-        commit_pos = None
-        for index, out in enumerate(self.vtx[0].vout):
-            script = out.scriptPubKey
-            if len(script) >= 38 and script[:6] == WITNESS_COINBASE_SCRIPTPUBKEY_MAGIC:
-                commit_pos = index
-        if commit_pos is None:
-            raise ValueError('The witness commitment is missed')
-        return commit_pos
-
-    def __init__(self, nVersion=2, hashPrevBlock=b'\x00'*32, hashMerkleRoot=b'\x00'*32, nTime=0, nBits=0, nNonce=0, vtx=()):
-        """Create a new block"""
-        if vtx:
-            vMerkleTree = tuple(CBlock.build_merkle_tree_from_txs(vtx))
-            if hashMerkleRoot == b'\x00'*32:
-                hashMerkleRoot = vMerkleTree[-1]
-            elif hashMerkleRoot != vMerkleTree[-1]:
-                raise CheckBlockError("CBlock : hashMerkleRoot is not compatible with vtx")
-        else:
-            vMerkleTree = ()
-        super(CBlock, self).__init__(nVersion, hashPrevBlock, hashMerkleRoot, nTime, nBits, nNonce)
-
-        object.__setattr__(self, 'vMerkleTree', vMerkleTree)
-        try:
-            vWitnessMerkleTree = tuple(CBlock.build_witness_merkle_tree_from_txs(vtx))
-        except NoWitnessData:
-            vWitnessMerkleTree = ()
-        object.__setattr__(self, 'vWitnessMerkleTree', vWitnessMerkleTree)
-        object.__setattr__(self, 'vtx', tuple(CTransaction.from_tx(tx) for tx in vtx))
-
-    @classmethod
-    def stream_deserialize(cls, f):
-        self = super(CBlock, cls).stream_deserialize(f)
-
-        vtx = VectorSerializer.stream_deserialize(CTransaction, f)
-        vMerkleTree = tuple(CBlock.build_merkle_tree_from_txs(vtx))
-        object.__setattr__(self, 'vMerkleTree', vMerkleTree)
-        try:
-            vWitnessMerkleTree = tuple(CBlock.build_witness_merkle_tree_from_txs(vtx))
-        except NoWitnessData:
-            vWitnessMerkleTree = ()
-        object.__setattr__(self, 'vWitnessMerkleTree', vWitnessMerkleTree)
-        object.__setattr__(self, 'vtx', tuple(vtx))
-
-        return self
-
-    def stream_serialize(self, f, include_witness=True):
-        super(CBlock, self).stream_serialize(f)
-        VectorSerializer.stream_serialize(CTransaction, self.vtx, f, dict(include_witness=include_witness))
-
-    def get_header(self):
-        """Return the block header
-
-        Returned header is a new object.
-        """
-        return CBlockHeader(nVersion=self.nVersion,
-                            hashPrevBlock=self.hashPrevBlock,
-                            hashMerkleRoot=self.hashMerkleRoot,
-                            nTime=self.nTime,
-                            nBits=self.nBits,
-                            nNonce=self.nNonce)
-
-    def GetHash(self):
-        """Return the block hash
-
-        Note that this is the hash of the header, not the entire serialized
-        block.
-        """
-        try:
-            return self._cached_GetHash
-        except AttributeError:
-            _cached_GetHash = self.get_header().GetHash()
-            object.__setattr__(self, '_cached_GetHash', _cached_GetHash)
-            return _cached_GetHash
-
-    def GetWeight(self):
-        """Return the block weight: (stripped_size * 3) + total_size"""
-        return len(self.serialize(dict(include_witness=False))) * 3 + len(self.serialize())
-
-
 class _ParamsTag():
     pass
+
 
 class CoreChainParams(object):
     """Define consensus-critical parameters of a given instance of the Bitcoin system"""
@@ -723,7 +505,6 @@ class CoreChainParams(object):
 class CoreMainParams(CoreChainParams, _ParamsTag):
     MAX_MONEY = 21000000 * COIN
     NAME = 'mainnet'
-    GENESIS_BLOCK = CBlock.deserialize(x('0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a29ab5f49ffff001d1dac2b7c0101000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000'))
     SUBSIDY_HALVING_INTERVAL = 210000
     PROOF_OF_WORK_LIMIT = 2**256-1 >> 32
 
@@ -737,12 +518,10 @@ class CoreElementsSidechainParams(CoreMainParams, _ParamsTag):
 
 class CoreTestNetParams(CoreMainParams, _ParamsTag):
     NAME = 'testnet'
-    GENESIS_BLOCK = CBlock.deserialize(x('0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4adae5494dffff001d1aa4ae180101000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000'))
 
 
 class CoreRegTestParams(CoreTestNetParams, _ParamsTag):
     NAME = 'regtest'
-    GENESIS_BLOCK = CBlock.deserialize(x('0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4adae5494dffff7f20020000000101000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000'))
     SUBSIDY_HALVING_INTERVAL = 150
     PROOF_OF_WORK_LIMIT = 2**256-1 >> 1
 
@@ -827,56 +606,6 @@ def CheckTransaction(tx):
                 raise CheckTransactionError("CheckTransaction() : prevout is null")
 
 
-class CheckBlockHeaderError(ValidationError):
-    pass
-
-
-class CheckProofOfWorkError(CheckBlockHeaderError):
-    pass
-
-
-def CheckProofOfWork(hash, nBits):
-    """Check a proof-of-work
-
-    Raises CheckProofOfWorkError
-    """
-    target = uint256_from_compact(nBits)
-
-    # Check range
-    if not (0 < target <= coreparams.PROOF_OF_WORK_LIMIT):
-        raise CheckProofOfWorkError("CheckProofOfWork() : nBits below minimum work")
-
-    # Check proof of work matches claimed amount
-    hash = uint256_from_str(hash)
-    if hash > target:
-        raise CheckProofOfWorkError("CheckProofOfWork() : hash doesn't match nBits")
-
-
-def CheckBlockHeader(block_header, fCheckPoW=True, cur_time=None):
-    """Context independent CBlockHeader checks.
-
-    fCheckPoW - Check proof-of-work.
-
-    cur_time  - Current time. Defaults to time.time()
-
-    Raises CBlockHeaderError if block header is invalid.
-    """
-    if cur_time is None:
-        cur_time = time.time()
-
-    # Check proof-of-work matches claimed amount
-    if fCheckPoW:
-        CheckProofOfWork(block_header.GetHash(), block_header.nBits)
-
-    # Check timestamp
-    if block_header.nTime > cur_time + 2 * 60 * 60:
-        raise CheckBlockHeaderError("CheckBlockHeader() : block timestamp too far in the future")
-
-
-class CheckBlockError(CheckBlockHeaderError):
-    pass
-
-
 def GetLegacySigOpCount(tx):
     nSigOps = 0
     for txin in tx.vin:
@@ -885,83 +614,6 @@ def GetLegacySigOpCount(tx):
         nSigOps += txout.scriptPubKey.GetSigOpCount(False)
     return nSigOps
 
-
-def CheckBlock(block, fCheckPoW=True, fCheckMerkleRoot=True, cur_time=None):
-    """Context independent CBlock checks.
-
-    CheckBlockHeader() is called first, which may raise a CheckBlockHeader
-    exception, followed the block tests. CheckTransaction() is called for every
-    transaction.
-
-    fCheckPoW        - Check proof-of-work.
-
-    fCheckMerkleRoot - Check merkle root and witness merkle root matches transactions.
-                     - Check witness commitment in coinbase
-
-    cur_time         - Current time. Defaults to time.time()
-    """
-
-    # Block header checks
-    CheckBlockHeader(block.get_header(), fCheckPoW=fCheckPoW, cur_time=cur_time)
-
-    # Size limits
-    if not block.vtx:
-        raise CheckBlockError("CheckBlock() : vtx empty")
-    if len(block.serialize(dict(include_witness=False))) > MAX_BLOCK_SIZE:
-        raise CheckBlockError("CheckBlock() : block larger than MAX_BLOCK_SIZE")
-
-    if block.GetWeight() > MAX_BLOCK_WEIGHT:
-        raise CheckBlockError("CheckBlock() : block larger than MAX_BLOCK_WEIGHT")
-
-    # First transaction must be coinbase
-    if not block.vtx[0].is_coinbase():
-        raise CheckBlockError("CheckBlock() : first tx is not coinbase")
-
-    # Check rest of transactions. Note how we do things "all at once", which
-    # could potentially be a consensus failure if there was some obscure bug.
-
-    # For unique txid uniqueness testing. If coinbase tx is included twice
-    # it'll be caught by the "more than one coinbase" test.
-    unique_txids = set()
-    nSigOps = 0
-    for tx in block.vtx[1:]:
-        if tx.is_coinbase():
-            raise CheckBlockError("CheckBlock() : more than one coinbase")
-
-        CheckTransaction(tx)
-
-        txid = tx.GetTxid()
-        if txid in unique_txids:
-            raise CheckBlockError("CheckBlock() : duplicate transaction")
-        unique_txids.add(txid)
-
-        nSigOps += GetLegacySigOpCount(tx)
-        if nSigOps > MAX_BLOCK_SIGOPS:
-            raise CheckBlockError("CheckBlock() : out-of-bounds SigOpCount")
-
-    # Check merkle root
-    if fCheckMerkleRoot:
-        if block.hashMerkleRoot != block.calc_merkle_root():
-            raise CheckBlockError("CheckBlock() : hashMerkleRoot mismatch")
-        if len(block.vWitnessMerkleTree):
-            # At least 1 tx has witness: check witness merkle tree
-            root = block.vWitnessMerkleTree[-1]
-            # vtx[0]: coinbase
-            # vtxinwit[0]: first input
-            nonce_script = block.vtx[0].wit.vtxinwit[0].scriptWitness
-            nonce = nonce_script.stack[0]
-            if len(nonce_script.stack) != 1 or len(nonce) != 32:
-                raise CheckBlockError("CheckBlock() : invalid coinbase witnessScript")
-            try:
-                index = block.get_witness_commitment_index()
-            except ValueError as e:
-                raise CheckBlockError("CheckBlock() : " + str(e))
-            commit_script = block.vtx[0].vout[index].scriptPubKey
-            if not (6 + 32 <= len(commit_script) <= 6 + 32 + 1):
-                raise CheckBlockError("CheckBlock() : invalid segwit commitment length")
-            commit = commit_script[6:6 + 32]
-            if commit != Hash(root + nonce):
-                raise CheckBlockError("CheckBlock() : invalid segwit commitment")
 
 __all__ = (
         'Hash',
@@ -986,19 +638,11 @@ __all__ = (
         'CMutableTransaction',
         'CTxWitness',
         'CTxInWitness',
-        'CBlockHeader',
-        'CBlock',
         'CoreChainParams',
         'CoreMainParams',
         'CoreTestNetParams',
         'CoreRegTestParams',
         'CheckTransactionError',
         'CheckTransaction',
-        'CheckBlockHeaderError',
-        'CheckProofOfWorkError',
-        'CheckProofOfWork',
-        'CheckBlockHeader',
-        'CheckBlockError',
         'GetLegacySigOpCount',
-        'CheckBlock',
 )
