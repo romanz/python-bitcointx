@@ -357,7 +357,9 @@ class CTransactionBase(ImmutableSerializable):
     _txin_class = None
     _txout_class = None
 
-    def __init__(self, vin=(), vout=(), nLockTime=0, nVersion=1, witness=None):
+    CURRENT_VERSION = 2
+
+    def __init__(self, vin=(), vout=(), nLockTime=0, nVersion=None, witness=None):
         """Create a new transaction
 
         vin and vout are iterables of transaction inputs and outputs
@@ -369,6 +371,9 @@ class CTransactionBase(ImmutableSerializable):
 
         if witness is None:
             witness = self._witness_class()
+
+        if nVersion is None:
+            nVersion = self.CURRENT_VERSION
 
         object.__setattr__(self, 'nLockTime', nLockTime)
         object.__setattr__(self, 'nVersion', nVersion)
@@ -483,9 +488,13 @@ class CMutableTransactionBase(CTransactionBase):
     """A mutable transaction"""
     __slots__ = []
 
-    def __init__(self, vin=None, vout=None, nLockTime=0, nVersion=1, witness=None):
+    def __init__(self, vin=None, vout=None, nLockTime=0, nVersion=None, witness=None):
         if not (0 <= nLockTime <= 0xffffffff):
             raise ValueError('CTransaction: nLockTime must be in range 0x0 to 0xffffffff; got %x' % nLockTime)
+
+        if nVersion is None:
+            nVersion = self.CURRENT_VERSION
+
         self.nLockTime = nLockTime
 
         if vin is None:
