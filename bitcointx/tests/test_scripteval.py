@@ -128,10 +128,10 @@ class Test_EvalScript(unittest.TestCase):
         txCredit = CTransaction([CTxIn(COutPoint(), CScript([OP_0, OP_0]), nSequence=0xFFFFFFFF)],
                                 [CTxOut(nValue, scriptPubKey)],
                                 witness=CTxWitness(),
-                                nLockTime=0)
+                                nLockTime=0, nVersion=1)
         txSpend = CTransaction([CTxIn(COutPoint(txCredit.GetTxid(), 0), scriptSig, nSequence=0xFFFFFFFF)],
                                [CTxOut(nValue, CScript())],
-                               nLockTime=0,
+                               nLockTime=0, nVersion=1,
                                witness=CTxWitness([CTxInWitness(witness)]))
         return (txCredit, txSpend)
 
