@@ -136,13 +136,11 @@ class Test_EvalScript(unittest.TestCase):
         return (txCredit, txSpend)
 
     def test_script(self):
-        num = 0
         for t in load_test_vectors('script_tests.json'):
             (scriptSig, scriptPubKey, witness, nValue,
              flags, expected_result, comment, test_case) = t
             (txCredit, txSpend) = self.create_test_txs(scriptSig, scriptPubKey, witness, nValue)
 
-            num += 1
             try:
                 VerifyScript(scriptSig, scriptPubKey, txSpend, 0, flags, amount=nValue, witness=witness)
             except ValidationError as err:

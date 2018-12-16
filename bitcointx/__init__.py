@@ -93,7 +93,7 @@ def SelectAlternativeParams(alt_core_params, alt_main_params):
 
     assert(issubclass(alt_main_params, alt_core_params))
 
-    params = alt_main_params
+    params = alt_main_params()
 
     if 'bitcointx.wallet' in sys.modules:
         bitcointx.wallet._SetBase58Prefixes()

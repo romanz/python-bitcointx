@@ -9,7 +9,7 @@
 # propagated, or distributed except according to the terms contained in the
 # LICENSE file.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+# pylama:ignore=E501
 
 import json
 import unittest
@@ -19,6 +19,7 @@ from bitcointx.core import *
 from bitcointx.core.scripteval import VerifyScript, SCRIPT_VERIFY_P2SH
 
 from bitcointx.tests.test_scripteval import parse_script
+
 
 def load_test_vectors(name):
     with open(os.path.dirname(__file__) + '/data/' + name, 'r') as fd:
@@ -37,10 +38,12 @@ def load_test_vectors(name):
                 prevout = COutPoint(lx(json_prevout[0]), n)
                 prevouts[prevout] = parse_script(json_prevout[2])
 
-            tx = CTransaction.deserialize(x(test_case[1]))
+            tx_data = x(test_case[1])
+            tx = CTransaction.deserialize(tx_data)
             enforceP2SH = test_case[2]
 
-            yield (prevouts, tx, enforceP2SH)
+            yield (prevouts, tx, tx_data, enforceP2SH)
+
 
 class Test_COutPoint(unittest.TestCase):
     def test_is_null(self):
@@ -134,7 +137,8 @@ class Test_CTransaction(unittest.TestCase):
         self.assertFalse(tx.is_coinbase())
 
     def test_tx_valid(self):
-        for prevouts, tx, enforceP2SH in load_test_vectors('tx_valid.json'):
+        for prevouts, tx, tx_data, enforceP2SH in load_test_vectors('tx_valid.json'):
+            self.assertEquals(tx_data, tx.serialize())
             try:
                 CheckTransaction(tx)
             except CheckTransactionError:
@@ -149,9 +153,8 @@ class Test_CTransaction(unittest.TestCase):
 
                 VerifyScript(tx.vin[i].scriptSig, prevouts[tx.vin[i].prevout], tx, i, flags=flags)
 
-
     def test_tx_invalid(self):
-        for prevouts, tx, enforceP2SH in load_test_vectors('tx_invalid.json'):
+        for prevouts, tx, _, enforceP2SH in load_test_vectors('tx_invalid.json'):
             try:
                 CheckTransaction(tx)
             except CheckTransactionError:
