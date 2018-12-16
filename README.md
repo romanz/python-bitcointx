@@ -1,18 +1,18 @@
 # python-bitcointx
 
-This Python3 library provides an easy interface to the bitcoin data
+This Python3 library provides an easy interface to the bitcoin transaction data
 structures. This is based on https://github.com/petertodd/python-bitcoinlib,
 but is focused only on providing the tools to build, manipulate and sign
 bitcoin transactions, and related data structures.
 
 ## Notable differences from python-bitcoinlib:
 
-* Network-related code that deals with sending and receiving data
-  from and to bitcoin nodes is removed.
+* Network-related code that deals with network messages and blocks is removed.
 * libsecp256k1 are used for signing and verifying.
   Signing by libsecp256k1 is deterministic, per RFC6979.
 * Bech32-encoded address support
 * HD keys support
+* Confidential Addresses and Confidential Transaction support for Elements sidechain
 
 ## Requirements
 
