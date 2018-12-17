@@ -392,16 +392,36 @@ class CBitcoinTxWitness(CTxWitnessBase):
     # NOTE: this cannot be a @classmethod like the others because we need to
     # know how many items to deserialize, which comes from len(vin)
     def stream_deserialize(self, f):
-        vtxinwit = tuple(CTxInWitness.stream_deserialize(f) for dummy in
-                         range(len(self.vtxinwit)))
+        vtxinwit = tuple(self._txin_witness_class.stream_deserialize(f)
+                         for dummy in range(len(self.vtxinwit)))
         return self.__class__(vtxinwit)
 
     def stream_serialize(self, f):
         for i in range(len(self.vtxinwit)):
             self.vtxinwit[i].stream_serialize(f)
 
+    @classmethod
+    def from_witness(cls, witness):
+        if not cls._immutable_restriction_lifted:
+            return witness
+        return cls(witness.vtxinwit)
+
     def __repr__(self):
         return "CTxWitness([%s])" % (','.join(repr(w) for w in self.vtxinwit))
+
+
+@__make_mutable
+class CBitcoinMutableTxWitness(CBitcoinTxWitness):
+    """Witness data for all inputs to a transaction, mutable version"""
+    __slots__ = []
+
+    def __init__(self, vtxinwit=(), vtxoutwit=None):
+        # Note: vtxoutwit is ignored, does not exist for bitcon tx witness
+        self.vtxinwit = list(vtxinwit)
+
+    @classmethod
+    def from_witness(cls, witness):
+        return cls(witness.vtxinwit)
 
 
 class CTransactionBase(ImmutableSerializable):
@@ -425,7 +445,7 @@ class CTransactionBase(ImmutableSerializable):
             raise ValueError('CTransaction: nLockTime must be in range 0x0 to 0xffffffff; got %x' % nLockTime)
 
         if witness is None:
-            witness = CTxWitness()
+            witness = self._witness_class()
 
         if nVersion is None:
             nVersion = self.CURRENT_VERSION
@@ -434,11 +454,7 @@ class CTransactionBase(ImmutableSerializable):
         object.__setattr__(self, 'nVersion', nVersion)
         object.__setattr__(self, 'vin', tuple(self._txin_class.from_txin(txin) for txin in vin))
         object.__setattr__(self, 'vout', tuple(self._txout_class.from_txout(txout) for txout in vout))
-        # we only have immutable witness class.
-        # if mutable class is later implemented,
-        # below code should be changed to use witness.from_witness(witness)
-        assert not witness._immutable_restriction_lifted
-        object.__setattr__(self, 'wit', witness)
+        object.__setattr__(self, 'wit', self._witness_class.from_witness(witness))
 
     @classmethod
     def stream_deserialize(cls, f):
@@ -464,8 +480,8 @@ class CTransactionBase(ImmutableSerializable):
         if markerbyte == 0 and flagbyte == 1:
             vin = VectorSerializer.stream_deserialize(cls._txin_class, f)
             vout = VectorSerializer.stream_deserialize(cls._txout_class, f)
-            wit = CTxWitness(tuple(0 for dummy in range(len(vin))),
-                             tuple(0 for dummy in range(len(vout))))
+            wit = self._witness_class(tuple(0 for dummy in range(len(vin))),
+                                      tuple(0 for dummy in range(len(vout))))
             wit = wit.stream_deserialize(f)
             nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
             return cls(vin, vout, nLockTime, nVersion, wit)
@@ -567,8 +583,9 @@ class CMutableTransactionBase(CTransactionBase):
         self.nVersion = nVersion
 
         if witness is None:
-            witness = CTxWitness([CTxInWitness() for dummy in range(len(vin))],
-                                 [CTxOutWitness() for dummy in range(len(vout))])
+            wclass = self._witness_class
+            witness = wclass([wclass._txin_witness_class() for dummy in range(len(vin))],
+                             [wclass._txout_witness_class() for dummy in range(len(vout))])
         self.wit = witness
 
     @classmethod
@@ -581,18 +598,16 @@ class CMutableTransactionBase(CTransactionBase):
         return cls(vin, vout, tx.nLockTime, tx.nVersion, tx.wit)
 
 
-class CBitcoinTransactionCommon():
-    _witness_class = CBitcoinTxWitness
-
-
-class CBitcoinMutableTransaction(CBitcoinTransactionCommon, CMutableTransactionBase):
+class CBitcoinMutableTransaction(CMutableTransactionBase):
     # _inverted_mutability_class will be set in _SelectAlternativeCoreParams
+    _witness_class = CBitcoinMutableTxWitness
     _txin_class = CBitcoinMutableTxIn
     _txout_class = CBitcoinMutableTxOut
 
 
-class CBitcoinTransaction(CBitcoinTransactionCommon, CImmutableTransactionBase):
+class CBitcoinTransaction(CImmutableTransactionBase):
     _inverted_mutability_class = CBitcoinMutableTransaction
+    _witness_class = CBitcoinTxWitness
     _txin_class = CBitcoinTxIn
     _txout_class = CBitcoinTxOut
 
@@ -799,9 +814,9 @@ class CElementsSidechainTxWitness(CTxWitnessBase):
     # NOTE: this cannot be a @classmethod like the others because we need to
     # know how many items to deserialize, which comes from len(vin)
     def stream_deserialize(self, f):
-        vtxinwit = tuple(CTxInWitness.stream_deserialize(f) for dummy in
+        vtxinwit = tuple(self._txin_witness_class.stream_deserialize(f) for dummy in
                          range(len(self.vtxinwit)))
-        vtxoutwit = tuple(CTxOutWitness.stream_deserialize(f) for dummy in
+        vtxoutwit = tuple(self._txout_witness_class.stream_deserialize(f) for dummy in
                           range(len(self.txout)))
         return self.__class__(vtxinwit, vtxoutwit)
 
@@ -811,9 +826,28 @@ class CElementsSidechainTxWitness(CTxWitnessBase):
         for i in range(len(self.vtxoutwit)):
             self.vtxoutwit[i].stream_serialize(f)
 
+    @classmethod
+    def from_witness(cls, witness):
+        if not cls._immutable_restriction_lifted:
+            return witness
+        return cls(witness.vtxinwit, witness.vtxoutwit)
+
     def __repr__(self):
         return "CTxWitness([%s], [%s])" % (','.join(repr(w) for w in self.vtxinwit),
                                            (','.join(repr(w) for w in self.vtxoutwit)))
+
+
+@__make_mutable
+class CElementsSidechainMutableTxWitness(CElementsSidechainTxWitness):
+    __slots__ = []
+
+    def __init__(self, vtxinwit=(), vtxoutwit=()):
+        self.vtxinwit = list(vtxinwit)
+        self.vtxoutwit = list(vtxoutwit)
+
+    @classmethod
+    def from_witness(cls, witness):
+        return cls(witness.vtxinwit, witness.vtxoutwit)
 
 
 class CAssetIssuance(ImmutableSerializable):
@@ -1017,18 +1051,16 @@ class CElementsSidechainMutableTxOut(CElementsSidechainTxOut):
                    txout.nAsset, txout.nNonce)
 
 
-class CElementsSidechainTransactionCommon():
-    _witness_class = CElementsSidechainTxWitness
-
-
-class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, CMutableTransactionBase):
+class CElementsSidechainMutableTransaction(CMutableTransactionBase):
     # _inverted_mutability_class will be set in _SelectAlternativeCoreParams
+    _witness_class = CElementsSidechainTxWitness
     _txin_class = CElementsSidechainMutableTxIn
     _txout_class = CElementsSidechainMutableTxOut
 
 
-class CElementsSidechainTransaction(CElementsSidechainTransactionCommon, CImmutableTransactionBase):
+class CElementsSidechainTransaction(CImmutableTransactionBase):
     _inverted_mutability_class = CElementsSidechainMutableTransaction
+    _witness_class = CElementsSidechainMutableTxWitness
     _txin_class = CElementsSidechainTxIn
     _txout_class = CElementsSidechainTxOut
 
@@ -1193,6 +1225,10 @@ class CTxWitness(metaclass=_TransactionClassParamsMeta):
     pass
 
 
+class CMutableTxWitness(metaclass=_TransactionClassParamsMeta):
+    pass
+
+
 class CTxInWitness(metaclass=_TransactionClassParamsMeta):
     pass
 
@@ -1224,8 +1260,8 @@ def _SetTransactionClassParams():
 
     _transaction_class_params[CTransaction] = imm_class
     _transaction_class_params[CMutableTransaction] = mut_class
-    assert imm_class._witness_class == mut_class._witness_class
     _transaction_class_params[CTxWitness] = imm_class._witness_class
+    _transaction_class_params[CMutableTxWitness] = imm_class._witness_class
     _transaction_class_params[CTxInWitness] = imm_class._witness_class._txin_witness_class
     _transaction_class_params[CTxOutWitness] = imm_class._witness_class._txout_witness_class
     _transaction_class_params[CTxIn] = imm_class._txin_class

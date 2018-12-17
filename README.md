@@ -57,7 +57,7 @@ CPubKey, nValue etc. Otherwise Python naming conventions are followed.
 
 Like the Bitcoin Core codebase CTransaction is immutable and
 CMutableTransaction is mutable; unlike the Bitcoin Core codebase this
-distinction also applies to COutPoint, CTxIn, CTxOut.
+distinction also applies to COutPoint, CTxIn, CTxOut and CTxWitness.
 
 
 ## Endianness Gotchas
