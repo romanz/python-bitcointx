@@ -13,6 +13,7 @@
 
 import binascii
 import struct
+from abc import ABCMeta, abstractmethod
 
 from .script import CScript, CScriptWitness, OP_RETURN
 
@@ -86,6 +87,19 @@ def str_money_value(value):
     return r
 
 
+def _str_money_value_for_repr(nValue):
+    if nValue >= 0:
+        "%s*COIN" % (str_money_value(nValue), )
+    else:
+        "%d" % (self.nValue,)
+
+
+def _bytes_for_repr(buf):
+    if len(buf) > 0 and all(b == buf[0] for b in buf):
+        return "x('{}')*{}".format(b2x(buf[:1]), len(buf))
+    return "x('{}')".format(b2x(buf))
+
+
 class ValidationError(Exception):
     """Base class for all blockchain validation errors
 
@@ -104,6 +118,19 @@ def __make_mutable(cls):
     cls.__hash__ = Serializable.__hash__
     cls._immutable_restriction_lifted = True
     return cls
+
+
+class _ReprOrStrMixin(metaclass=ABCMeta):
+
+    @abstractmethod
+    def _repr_or_str(self, strfn):
+        ...
+
+    def __str__(self):
+        return self._repr_or_str(str)
+
+    def __repr__(self):
+        return self._repr_or_str(repr)
 
 
 class _UintBitVectorMeta(type):
@@ -307,10 +334,7 @@ class CBitcoinTxOut(CTxOutBase):
         return True
 
     def __repr__(self):
-        if self.nValue >= 0:
-            return "CTxOut(%s*COIN, %r)" % (str_money_value(self.nValue), self.scriptPubKey)
-        else:
-            return "CTxOut(%d, %r)" % (self.nValue, self.scriptPubKey)
+        return "CTxOut(%s, %r)" % (_str_money_value_for_repr(self.nValue), self.scriptPubKey)
 
     @classmethod
     def from_txout(cls, txout):
@@ -424,7 +448,7 @@ class CBitcoinMutableTxWitness(CBitcoinTxWitness):
         return cls(witness.vtxinwit)
 
 
-class CTransactionBase(ImmutableSerializable):
+class CTransactionBase(ImmutableSerializable, _ReprOrStrMixin):
     """A transaction"""
     __slots__ = ['nVersion', 'vin', 'vout', 'nLockTime', 'wit']
 
@@ -480,8 +504,8 @@ class CTransactionBase(ImmutableSerializable):
         if markerbyte == 0 and flagbyte == 1:
             vin = VectorSerializer.stream_deserialize(cls._txin_class, f)
             vout = VectorSerializer.stream_deserialize(cls._txout_class, f)
-            wit = self._witness_class(tuple(0 for dummy in range(len(vin))),
-                                      tuple(0 for dummy in range(len(vout))))
+            wit = cls._witness_class(tuple(0 for dummy in range(len(vin))),
+                                     tuple(0 for dummy in range(len(vout))))
             wit = wit.stream_deserialize(f)
             nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
             return cls(vin, vout, nLockTime, nVersion, wit)
@@ -517,9 +541,10 @@ class CTransactionBase(ImmutableSerializable):
         """True if witness"""
         return not self.wit.is_null()
 
-    def __repr__(self):
-        return "CTransaction(%r, %r, %i, %i, %r)" % (self.vin, self.vout,
-                                                     self.nLockTime, self.nVersion, self.wit)
+    def _repr_or_str(self, strfn):
+        return "CTransaction(%r, %r, %i, %i, %r)" % ([strfn(v) for v in self.vin],
+                                                     [strfn(v) for v in self.vout],
+                                                     self.nLockTime, self.nVersion, strfn(self.wit))
 
     def GetTxid(self):
         """Get the transaction ID.  This differs from the transactions hash as
@@ -672,11 +697,31 @@ class CConfidentialCommitmentBase(ImmutableSerializable):
     def is_valid(self):
         return self.is_null() or self.is_explicit() or self.is_commitment()
 
+    def _get_explicit(self):
+        raise NotImplementedError
+
+    def __str__(self):
+        if self.is_explicit():
+            v = str(self._get_explicit())
+        else:
+            v = 'CONFIDENTIAL'
+        return "{}({})".format(self.__class__.__name__, v)
+
+    def __repr__(self):
+        if self.is_explicit():
+            v = repr(self._get_explicit())
+        else:
+            v = _bytes_for_repr(self.commitment)
+        return "{}({})".format(self.__class__.__name__, v)
+
 
 class CAsset(_Uint256):
     @property
     def id(self):
         return self.data
+
+    def __repr__(self):
+        return "CAsset({})".format(_bytes_for_repr(self.id))
 
 
 class CConfidentialAsset(CConfidentialCommitmentBase):
@@ -684,13 +729,24 @@ class CConfidentialAsset(CConfidentialCommitmentBase):
     _prefixA = 10
     _prefixB = 11
 
+    def __init__(self, asset_or_commitment=b''):
+        if isinstance(asset_or_commitment, CAsset):
+            commitment = bytes([1]) + asset_or_commitment
+        else:
+            commitment = asset_or_commitment
+        super(CConfidentialAsset, self).__init__(commitment)
+
     @classmethod
     def from_asset(cls, asset):
-        return cls(bytes[1] + asset)
+        assert isinstance(asset, CAsset)
+        return cls(asset)
 
     def to_asset(self):
         assert self.is_explicit()
         return CAsset(self.commitment[1:])
+
+    def _get_explicit(self):
+        return self.to_asset()
 
 
 class CConfidentialValue(CConfidentialCommitmentBase):
@@ -698,20 +754,24 @@ class CConfidentialValue(CConfidentialCommitmentBase):
     _prefixA = 8
     _prefixB = 9
 
+    def __init__(self, value_or_commitment=b''):
+        if isinstance(value_or_commitment, int):
+            commitment = bytes([1]) + struct.pack(b"<q", value_or_commitment)
+        else:
+            commitment = value_or_commitment
+        super(CConfidentialValue, self).__init__(commitment)
+
     @classmethod
     def from_amount(cls, amount):
-        packed_amount = struct.pack(b"<q", amount)
-        return cls(bytes[1] + packed_amount)
+        assert isinstance(amount, int)
+        return cls(amount)
 
     def to_amount(self):
+        assert self.is_explicit()
         return struct.unpack(b"<q", self.commitment[1:])[0]
 
-    def __repr__(self):
-        if self.is_explicit():
-            value = self.to_amount()
-            return '{}'.format((str_money_value(value) + '*COIN')
-                               if value >= 0 else value)
-        return "x('{}')".format(b2x(self.commitment))
+    def _get_explicit(self):
+        return self.to_amount()
 
 
 class CConfidentialNonce(CConfidentialCommitmentBase):
@@ -719,8 +779,15 @@ class CConfidentialNonce(CConfidentialCommitmentBase):
     _prefixA = 2
     _prefixB = 3
 
+    def _get_explicit(self):
+        return 'CONFIDENTIAL'
 
-class CElementsSidechainTxInWitness(CTxInWitnessBase):
+    def __repr__(self):
+        v = "x('{}')".format(b2x(self.commitment))
+        return "{}({})".format(self.__class__.__name__, v)
+
+
+class CElementsSidechainTxInWitness(CTxInWitnessBase, _ReprOrStrMixin):
     """Witness data for a single transaction input of elements sidechain transaction"""
     __slots__ = ['scriptWitness',
                  'issuanceAmountRangeproof', 'inflationKeysRangeproof', 'pegin_witness']
@@ -758,10 +825,10 @@ class CElementsSidechainTxInWitness(CTxInWitnessBase):
         self.scriptWitness.stream_serialize(f)
         self.pegin_witness.stream_serialize(f)
 
-    def __repr__(self):
-        return "CTxInWitness({}, x('{}'), x('{}'), {})".format(
-            repr(self.scriptWitness), b2x(self.issuanceAmountRangeproof),
-            b2x(self.inflationKeysRangeproof), self.pegin_witness)
+    def _repr_or_str(self, strfn):
+        return "CTxInWitness({}, {}, {}, {})".format(
+            strfn(self.scriptWitness), _bytes_for_repr(self.issuanceAmountRangeproof),
+            _bytes_for_repr(self.inflationKeysRangeproof), strfn(self.pegin_witness))
 
 
 class CElementsSidechainTxOutWitness(CTxOutWitnessBase):
@@ -788,11 +855,12 @@ class CElementsSidechainTxOutWitness(CTxOutWitnessBase):
         BytesSerializer.stream_serialize(self.rangeproof, f)
 
     def __repr__(self):
-        return "CTxOutWitness(x('{}'), x('{}'))".format(
-            b2x(self.surjectionProof), b2x(self.rangeproof))
+        return "CTxOutWitness({}, {})".format(
+            _bytes_for_repr(self.surjectionProof),
+            _bytes_for_repr(self.rangeproof))
 
 
-class CElementsSidechainTxWitness(CTxWitnessBase):
+class CElementsSidechainTxWitness(CTxWitnessBase, _ReprOrStrMixin):
     _txin_witness_class = CElementsSidechainTxInWitness
     _txout_witness_class = CElementsSidechainTxOutWitness
 
@@ -817,7 +885,7 @@ class CElementsSidechainTxWitness(CTxWitnessBase):
         vtxinwit = tuple(self._txin_witness_class.stream_deserialize(f) for dummy in
                          range(len(self.vtxinwit)))
         vtxoutwit = tuple(self._txout_witness_class.stream_deserialize(f) for dummy in
-                          range(len(self.txout)))
+                          range(len(self.vtxoutwit)))
         return self.__class__(vtxinwit, vtxoutwit)
 
     def stream_serialize(self, f):
@@ -832,9 +900,9 @@ class CElementsSidechainTxWitness(CTxWitnessBase):
             return witness
         return cls(witness.vtxinwit, witness.vtxoutwit)
 
-    def __repr__(self):
-        return "CTxWitness([%s], [%s])" % (','.join(repr(w) for w in self.vtxinwit),
-                                           (','.join(repr(w) for w in self.vtxoutwit)))
+    def _repr_or_str(self, strfn):
+        return "CTxWitness([%s], [%s])" % (','.join(strfn(w) for w in self.vtxinwit),
+                                           (','.join(strfn(w) for w in self.vtxoutwit)))
 
 
 @__make_mutable
@@ -850,7 +918,7 @@ class CElementsSidechainMutableTxWitness(CElementsSidechainTxWitness):
         return cls(witness.vtxinwit, witness.vtxoutwit)
 
 
-class CAssetIssuance(ImmutableSerializable):
+class CAssetIssuance(ImmutableSerializable, _ReprOrStrMixin):
     __slots__ = ['assetBlindingNonce', 'assetEntropy', 'nAmount', 'nInflationKeys']
 
     def __init__(self, assetBlindingNonce=_Uint256(), assetEntropy=_Uint256(),
@@ -877,13 +945,19 @@ class CAssetIssuance(ImmutableSerializable):
         self.nAmount.stream_serialize(f)
         self.nInflationKeys.stream_serialize(f)
 
-    def __repr__(self):
-        return "CAssetIssuance(x('{}'), x('{}'), {}, {})".format(
-            b2x(self.assetBlindingNonce.data), b2x(self.assetEntropy.data),
-            self.nAmount, self.nInflationKeys)
+    def _repr_or_str(self, strfn):
+        r = ["CAssetIssuance({}, {}".format(
+            _bytes_for_repr(self.assetBlindingNonce.data),
+            _bytes_for_repr(self.assetEntropy.data))]
+        if not self.nAmount.is_null():
+            r.append(', nAmount={}'.format(strfn(self.nAmount)))
+        if not self.nInflationKeys.is_null():
+            r.append(', nInflationKeys={}'.format(strfn(self.nInflationKeys)))
+        r.append(')')
+        return ''.join(r)
 
 
-class CElementsSidechainTxIn(CTxInBase):
+class CElementsSidechainTxIn(CTxInBase, _ReprOrStrMixin):
     """An input of an Elements sidechain transaction
     """
     __slots__ = ['prevout', 'scriptSig', 'nSequence', 'assetIssuance', 'is_pegin']
@@ -908,7 +982,7 @@ class CElementsSidechainTxIn(CTxInBase):
             has_asset_issuance = bool(base.prevout.n & OUTPOINT_ISSUANCE_FLAG)
             # The interpretation of this input as a peg-in is indicated by
             # a bit set in the outpoint index field.
-            self.m_is_pegin = bool(outpoint.n & OUTPOINT_PEGIN_FLAG)
+            is_pegin = bool(base.prevout.n & OUTPOINT_PEGIN_FLAG)
             # The mode, if set, must be masked out of the outpoint so
             # that the in-memory index field retains its traditional
             # meaning of identifying the index into the output array
@@ -959,9 +1033,9 @@ class CElementsSidechainTxIn(CTxInBase):
             return cls(COutPoint.from_outpoint(txin.prevout), txin.scriptSig, txin.nSequence,
                        txin.assetIssuance)
 
-    def __repr__(self):
-        return "CTxIn(%s, %s, 0x%x, %s)" % (repr(self.prevout), repr(self.scriptSig), self.nSequence,
-                                            self.assetIssuance)
+    def _repr_or_str(self, strfn):
+        return "CTxIn(%s, %s, 0x%x, %s)" % (strfn(self.prevout), repr(self.scriptSig),
+                                            self.nSequence, strfn(self.assetIssuance))
 
 
 @__make_mutable
@@ -981,7 +1055,7 @@ class CElementsSidechainMutableTxIn(CElementsSidechainTxIn):
         return cls(prevout, txin.scriptSig, txin.nSequence, txin.assetIssuance)
 
 
-class CElementsSidechainTxOut(CTxOutBase):
+class CElementsSidechainTxOut(CTxOutBase, _ReprOrStrMixin):
     """An output of an Elements sidechain transaction
     """
     __slots__ = ['nValue', 'scriptPubKey', 'nAsset', 'nNonce']
@@ -1021,11 +1095,9 @@ class CElementsSidechainTxOut(CTxOutBase):
                 and self.nValue.is_explicit()
                 and self.nAsset.is_explicit())
 
-    def __repr__(self):
-        asset = self.nAsset.to_asset()
-        nonce = self.nNonce.commitment
-        return "CTxOut({}, {}, x('{}'), x('{}'))".format(
-            self.nValue, self.scriptPubKey, b2x(asset.id), b2x(nonce))
+    def _repr_or_str(self, strfn):
+        return "CTxOut({}, {}, {})".format(
+            strfn(self.nValue), repr(self.scriptPubKey), strfn(self.nAsset))
 
     @classmethod
     def from_txout(cls, txout):
@@ -1304,4 +1376,8 @@ __all__ = (
         'CheckTransactionError',
         'CheckTransaction',
         'GetLegacySigOpCount',
+        'CAsset',
+        'CConfidentialAsset',
+        'CConfidentialValue',
+        'CConfidentialNonce',
 )
