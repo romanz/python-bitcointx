@@ -94,10 +94,10 @@ def _str_money_value_for_repr(nValue):
         "%d" % (self.nValue,)
 
 
-def _bytes_for_repr(buf):
+def _bytes_for_repr(buf, hexfun_name='x'):
     if len(buf) > 0 and all(b == buf[0] for b in buf):
-        return "x('{}')*{}".format(b2x(buf[:1]), len(buf))
-    return "x('{}')".format(b2x(buf))
+        return "{}('{}')*{}".format(hexfun_name, b2x(buf[:1]), len(buf))
+    return "{}('{}')".format(hexfun_name, b2lx(buf))
 
 
 class ValidationError(Exception):
@@ -721,7 +721,7 @@ class CAsset(_Uint256):
         return self.data
 
     def __repr__(self):
-        return "CAsset({})".format(_bytes_for_repr(self.id))
+        return "CAsset({})".format(_bytes_for_repr(self.id, hexfun_name='lx'))
 
 
 class CConfidentialAsset(CConfidentialCommitmentBase):
