@@ -756,7 +756,7 @@ class CConfidentialValue(CConfidentialCommitmentBase):
 
     def __init__(self, value_or_commitment=b''):
         if isinstance(value_or_commitment, int):
-            commitment = bytes([1]) + struct.pack(b"<q", value_or_commitment)
+            commitment = bytes([1]) + struct.pack(b">q", value_or_commitment)
         else:
             commitment = value_or_commitment
         super(CConfidentialValue, self).__init__(commitment)
@@ -768,7 +768,7 @@ class CConfidentialValue(CConfidentialCommitmentBase):
 
     def to_amount(self):
         assert self.is_explicit()
-        return struct.unpack(b"<q", self.commitment[1:])[0]
+        return struct.unpack(b">q", self.commitment[1:])[0]
 
     def _get_explicit(self):
         return self.to_amount()
