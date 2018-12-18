@@ -138,7 +138,8 @@ class Test_CTransaction(unittest.TestCase):
 
     def test_tx_valid(self):
         for prevouts, tx, tx_data, enforceP2SH in load_test_vectors('tx_valid.json'):
-            self.assertEquals(tx_data, tx.serialize())
+            self.assertEqual(tx_data, tx.serialize())
+            self.assertEqual(tx_data, CTransaction.deserialize(tx.serialize()).serialize())
             try:
                 CheckTransaction(tx)
             except CheckTransactionError:

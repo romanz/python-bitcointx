@@ -784,6 +784,39 @@ class CScript(bytes):
             return False
         return True
 
+    def get_pegout_data(self):
+        try:
+            op_iter = self.raw_iter()
+            op, _, _ = next(op_iter)
+            if op != OP_RETURN:
+                return None
+
+            op, op_data, _ = next(op_iter)
+            if len(op_data) != 32:
+                return None
+
+            genesis_hash = op_data
+
+            op, op_data, _ = next(op_iter)
+
+            if len(op_data) == 0:
+                return False
+
+            pegout_scriptpubkey = CScript(op_data)
+
+            # The code in reference client does not check if there
+            # is more data after pegout_scriptpubkey.
+
+        except CScriptInvalidError:
+            return None
+        except StopIteration:
+            return None
+
+        return (genesis_hash, pegout_scriptpubkey)
+
+    def is_pegout(self):
+        return self.get_pegout_data() is not None
+
     def to_p2sh_scriptPubKey(self, checksize=True):
         """Create P2SH scriptPubKey from this redeemScript
 

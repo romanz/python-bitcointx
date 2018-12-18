@@ -17,6 +17,7 @@ from abc import ABCMeta, abstractmethod
 
 from .script import CScript, CScriptWitness, OP_RETURN
 
+from .sha256 import CSHA256
 from .serialize import *
 
 # Core definitions
@@ -94,10 +95,16 @@ def _str_money_value_for_repr(nValue):
         "%d" % (self.nValue,)
 
 
-def _bytes_for_repr(buf, hexfun_name='x'):
+def _bytes_for_repr(buf, hexfun=x):
+    if hexfun is x:
+        bfun = b2x
+    elif hexfun is lx:
+        bfun = b2lx
+    else:
+        raise ValueError('invalid hexfun ({}) specified'.format(hexfun))
     if len(buf) > 0 and all(b == buf[0] for b in buf):
-        return "{}('{}')*{}".format(hexfun_name, b2x(buf[:1]), len(buf))
-    return "{}('{}')".format(hexfun_name, b2lx(buf))
+        return "{}('{}')*{}".format(hexfun.__name__, bfun(buf[:1]), len(buf))
+    return "{}('{}')".format(hexfun.__name__, bfun(buf))
 
 
 class ValidationError(Exception):
@@ -147,13 +154,17 @@ class _UintBitVector(ImmutableSerializable, metaclass=_UintBitVectorMeta):
     # to be set automatically by _UintBitVectorMeta
     _UINT_WIDTH_BYTES = None
 
-    def __init__(self, data=b'\x00'*32):
+    def __init__(self, data=None):
+        if data is None:
+            data = b'\x00'*self._UINT_WIDTH_BYTES
+        if not isinstance(data, bytes):
+            raise TypeError('invalid data type, should be bytes')
         if len(data) != self._UINT_WIDTH_BYTES:
             raise ValueError('invalid data length, should be {}'
                              .format(self._UINT_WIDTH_BYTES))
         object.__setattr__(self, 'data', data)
 
-    def is_null():
+    def is_null(self):
         return all(b == 0 for b in self.data)
 
     @classmethod
@@ -164,12 +175,27 @@ class _UintBitVector(ImmutableSerializable, metaclass=_UintBitVectorMeta):
     def stream_serialize(self, f):
         f.write(self.data)
 
+    def to_hex(self):
+        return b2lx(self.data)
 
-class _Uint256(_UintBitVector):
+    @classmethod
+    def from_hex(cls, hexdata):
+        return cls(lx(hexdata))
+
+    def __repr__(self):
+        return _bytes_for_repr(self.data, hexfun=lx)
+
+
+class Uint256(_UintBitVector):
     _UINT_WIDTH_BITS = 256
 
+    @classmethod
+    def from_int(cls, num):
+        assert num < 2**256
+        return cls(uint256_to_str(num))
+
     def to_int(self):
-        return uint256_from_str(self)
+        return uint256_from_str(self.data)
 
 
 class COutPoint(ImmutableSerializable):
@@ -284,14 +310,9 @@ class CBitcoinMutableTxIn(CBitcoinTxIn):
     __slots__ = []
 
     def __init__(self, prevout=None, scriptSig=CScript(), nSequence=0xffffffff):
-        if not (0 <= nSequence <= 0xffffffff):
-            raise ValueError('CTxIn: nSequence must be an integer between 0x0 and 0xffffffff; got %x' % nSequence)
-        self.nSequence = nSequence
-
         if prevout is None:
             prevout = CMutableOutPoint()
-        self.prevout = prevout
-        self.scriptSig = scriptSig
+        super(CBitcoinTxIn, self).__init__(prevout, scriptSig, nSequence)
 
     @classmethod
     def from_txin(cls, txin):
@@ -403,7 +424,7 @@ class CBitcoinTxWitness(CTxWitnessBase):
     _txin_witness_class = CBitcoinTxInWitness
     _txout_witness_class = _CBitcoinDummyTxOutWitness
 
-    def __init__(self, vtxinwit=(), vtxoutwit=None):
+    def __init__(self, vtxinwit=()):
         # Note: vtxoutwit is ignored, does not exist for bitcon tx witness
         object.__setattr__(self, 'vtxinwit', tuple(vtxinwit))
 
@@ -479,60 +500,6 @@ class CTransactionBase(ImmutableSerializable, _ReprOrStrMixin):
         object.__setattr__(self, 'vin', tuple(self._txin_class.from_txin(txin) for txin in vin))
         object.__setattr__(self, 'vout', tuple(self._txout_class.from_txout(txout) for txout in vout))
         object.__setattr__(self, 'wit', self._witness_class.from_witness(witness))
-
-    @classmethod
-    def stream_deserialize(cls, f):
-        """Deserialize transaction
-
-        This implementation corresponds to Bitcoin's SerializeTransaction() and
-        consensus behavior. Note that Bitcoin's DecodeHexTx() also has the
-        option to attempt deserializing as a non-witness transaction first,
-        falling back to the consensus behavior if it fails. The difference lies
-        in transactions which have zero inputs: they are invalid but may be
-        (de)serialized anyway for the purpose of signing them and adding
-        inputs. If the behavior of DecodeHexTx() is needed it could be added,
-        but not here.
-        """
-        # FIXME can't assume f is seekable
-        nVersion = struct.unpack(b"<i", ser_read(f, 4))[0]
-        pos = f.tell()
-
-        markerbyte = 0
-        if not issubclass(cls, CElementsSidechainTransaction):
-            markerbyte = struct.unpack(b'B', ser_read(f, 1))[0]
-        flagbyte = struct.unpack(b'B', ser_read(f, 1))[0]
-        if markerbyte == 0 and flagbyte == 1:
-            vin = VectorSerializer.stream_deserialize(cls._txin_class, f)
-            vout = VectorSerializer.stream_deserialize(cls._txout_class, f)
-            wit = cls._witness_class(tuple(0 for dummy in range(len(vin))),
-                                     tuple(0 for dummy in range(len(vout))))
-            wit = wit.stream_deserialize(f)
-            nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
-            return cls(vin, vout, nLockTime, nVersion, wit)
-        else:
-            if not issubclass(cls, CElementsSidechainTransaction):
-                f.seek(pos)  # put marker and flag bytes back, since we don't have peek
-            vin = VectorSerializer.stream_deserialize(cls._txin_class, f)
-            vout = VectorSerializer.stream_deserialize(cls._txout_class, f)
-            nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
-            return cls(vin, vout, nLockTime, nVersion)
-
-    def stream_serialize(self, f, include_witness=True):
-        f.write(struct.pack(b"<i", self.nVersion))
-        if include_witness and not self.wit.is_null():
-            assert(len(self.wit.vtxinwit) == len(self.vin))
-            if not isinstance(self, CElementsSidechainTransaction):
-                f.write(b'\x00')  # Marker
-            f.write(b'\x01')  # Flag
-            VectorSerializer.stream_serialize(self._txin_class, self.vin, f)
-            VectorSerializer.stream_serialize(self._txout_class, self.vout, f)
-            self.wit.stream_serialize(f)
-        else:
-            if isinstance(self, CElementsSidechainTransaction):
-                f.write(b'\x00')  # Flag is needed in Elements sidechain
-            VectorSerializer.stream_serialize(self._txin_class, self.vin, f)
-            VectorSerializer.stream_serialize(self._txout_class, self.vout, f)
-        f.write(struct.pack(b"<I", self.nLockTime))
 
     def is_coinbase(self):
         return len(self.vin) == 1 and self.vin[0].prevout.is_null()
@@ -623,14 +590,63 @@ class CMutableTransactionBase(CTransactionBase):
         return cls(vin, vout, tx.nLockTime, tx.nVersion, tx.wit)
 
 
-class CBitcoinMutableTransaction(CMutableTransactionBase):
+class CBitcoinTransactionCommon():
+
+    @classmethod
+    def stream_deserialize(cls, f):
+        """Deserialize transaction
+
+        This implementation corresponds to Bitcoin's SerializeTransaction() and
+        consensus behavior. Note that Bitcoin's DecodeHexTx() also has the
+        option to attempt deserializing as a non-witness transaction first,
+        falling back to the consensus behavior if it fails. The difference lies
+        in transactions which have zero inputs: they are invalid but may be
+        (de)serialized anyway for the purpose of signing them and adding
+        inputs. If the behavior of DecodeHexTx() is needed it could be added,
+        but not here.
+        """
+        # FIXME can't assume f is seekable
+        nVersion = struct.unpack(b"<i", ser_read(f, 4))[0]
+        pos = f.tell()
+        markerbyte = struct.unpack(b'B', ser_read(f, 1))[0]
+        flagbyte = struct.unpack(b'B', ser_read(f, 1))[0]
+        if markerbyte == 0 and flagbyte == 1:
+            vin = VectorSerializer.stream_deserialize(cls._txin_class, f)
+            vout = VectorSerializer.stream_deserialize(cls._txout_class, f)
+            wit = cls._witness_class(tuple(0 for dummy in range(len(vin))))
+            wit = wit.stream_deserialize(f)
+            nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
+            return cls(vin, vout, nLockTime, nVersion, wit)
+        else:
+            f.seek(pos)  # put marker byte back, since we don't have peek
+            vin = VectorSerializer.stream_deserialize(cls._txin_class, f)
+            vout = VectorSerializer.stream_deserialize(cls._txout_class, f)
+            nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
+            return cls(vin, vout, nLockTime, nVersion)
+
+    def stream_serialize(self, f, include_witness=True):
+        f.write(struct.pack(b"<i", self.nVersion))
+        if include_witness and not self.wit.is_null():
+            assert(len(self.wit.vtxinwit) == len(self.vin))
+            f.write(b'\x00')  # Marker
+            f.write(b'\x01')  # Flag
+            VectorSerializer.stream_serialize(self._txin_class, self.vin, f)
+            VectorSerializer.stream_serialize(self._txout_class, self.vout, f)
+            self.wit.stream_serialize(f)
+        else:
+            VectorSerializer.stream_serialize(self._txin_class, self.vin, f)
+            VectorSerializer.stream_serialize(self._txout_class, self.vout, f)
+        f.write(struct.pack(b"<I", self.nLockTime))
+
+
+class CBitcoinMutableTransaction(CBitcoinTransactionCommon, CMutableTransactionBase):
     # _inverted_mutability_class will be set in _SelectAlternativeCoreParams
     _witness_class = CBitcoinMutableTxWitness
     _txin_class = CBitcoinMutableTxIn
     _txout_class = CBitcoinMutableTxOut
 
 
-class CBitcoinTransaction(CImmutableTransactionBase):
+class CBitcoinTransaction(CBitcoinTransactionCommon, CImmutableTransactionBase):
     _inverted_mutability_class = CBitcoinMutableTransaction
     _witness_class = CBitcoinTxWitness
     _txin_class = CBitcoinTxIn
@@ -715,13 +731,16 @@ class CConfidentialCommitmentBase(ImmutableSerializable):
         return "{}({})".format(self.__class__.__name__, v)
 
 
-class CAsset(_Uint256):
-    @property
-    def id(self):
-        return self.data
+class CAsset():
+    __slots__ = ['id']
+
+    def __init__(self, id=Uint256()):
+        if not isinstance(id, Uint256):
+            id = Uint256(id)
+        object.__setattr__(self, 'id', id)
 
     def __repr__(self):
-        return "CAsset({})".format(_bytes_for_repr(self.id, hexfun_name='lx'))
+        return "CAsset({})".format(self.id)
 
 
 class CConfidentialAsset(CConfidentialCommitmentBase):
@@ -802,6 +821,8 @@ class CElementsSidechainTxInWitness(CTxInWitnessBase, _ReprOrStrMixin):
         object.__setattr__(self, 'scriptWitness', scriptWitness)
         object.__setattr__(self, 'issuanceAmountRangeproof', CScript(issuanceAmountRangeproof))
         object.__setattr__(self, 'inflationKeysRangeproof', CScript(inflationKeysRangeproof))
+        # Note that scriptWitness/pegin_witness naming convention mismatch
+        # exists in reference client code, and is retained here.
         object.__setattr__(self, 'pegin_witness', pegin_witness)
 
     def is_null(self):
@@ -826,6 +847,8 @@ class CElementsSidechainTxInWitness(CTxInWitnessBase, _ReprOrStrMixin):
         self.pegin_witness.stream_serialize(f)
 
     def _repr_or_str(self, strfn):
+        if self.is_null():
+            return "CTxInWitness()"
         return "CTxInWitness({}, {}, {}, {})".format(
             strfn(self.scriptWitness), _bytes_for_repr(self.issuanceAmountRangeproof),
             _bytes_for_repr(self.inflationKeysRangeproof), strfn(self.pegin_witness))
@@ -855,6 +878,8 @@ class CElementsSidechainTxOutWitness(CTxOutWitnessBase):
         BytesSerializer.stream_serialize(self.rangeproof, f)
 
     def __repr__(self):
+        if self.is_null():
+            return "CTxOutWitness()"
         return "CTxOutWitness({}, {})".format(
             _bytes_for_repr(self.surjectionProof),
             _bytes_for_repr(self.rangeproof))
@@ -921,7 +946,7 @@ class CElementsSidechainMutableTxWitness(CElementsSidechainTxWitness):
 class CAssetIssuance(ImmutableSerializable, _ReprOrStrMixin):
     __slots__ = ['assetBlindingNonce', 'assetEntropy', 'nAmount', 'nInflationKeys']
 
-    def __init__(self, assetBlindingNonce=_Uint256(), assetEntropy=_Uint256(),
+    def __init__(self, assetBlindingNonce=Uint256(), assetEntropy=Uint256(),
                  nAmount=CConfidentialValue(), nInflationKeys=CConfidentialValue()):
         object.__setattr__(self, 'assetBlindingNonce', assetBlindingNonce)
         object.__setattr__(self, 'assetEntropy', assetEntropy)
@@ -933,8 +958,8 @@ class CAssetIssuance(ImmutableSerializable, _ReprOrStrMixin):
 
     @classmethod
     def stream_deserialize(cls, f):
-        assetBlindingNonce = _Uint256.stream_deserialize(f)
-        assetEntropy = _Uint256.stream_deserialize(f)
+        assetBlindingNonce = Uint256.stream_deserialize(f)
+        assetEntropy = Uint256.stream_deserialize(f)
         nAmount = CConfidentialValue.stream_deserialize(f)
         nInflationKeys = CConfidentialValue.stream_deserialize(f)
         return cls(assetBlindingNonce, assetEntropy, nAmount, nInflationKeys)
@@ -946,15 +971,16 @@ class CAssetIssuance(ImmutableSerializable, _ReprOrStrMixin):
         self.nInflationKeys.stream_serialize(f)
 
     def _repr_or_str(self, strfn):
-        r = ["CAssetIssuance({}, {}".format(
-            _bytes_for_repr(self.assetBlindingNonce.data),
-            _bytes_for_repr(self.assetEntropy.data))]
+        r = []
+        if self.assetBlindingNonce.to_int():
+            r.append(_bytes_for_repr(self.assetBlindingNonce.data))
+        if self.assetEntropy.to_int():
+            r.append(_bytes_for_repr(self.assetEntropy.data))
         if not self.nAmount.is_null():
-            r.append(', nAmount={}'.format(strfn(self.nAmount)))
+            r.append(strfn(self.nAmount))
         if not self.nInflationKeys.is_null():
-            r.append(', nInflationKeys={}'.format(strfn(self.nInflationKeys)))
-        r.append(')')
-        return ''.join(r)
+            r.append(strfn(self.nInflationKeys))
+        return 'CAssetIssuance({})'.format(', '.join(r))
 
 
 class CElementsSidechainTxIn(CTxInBase, _ReprOrStrMixin):
@@ -1045,9 +1071,11 @@ class CElementsSidechainMutableTxIn(CElementsSidechainTxIn):
     __slots__ = []
 
     def __init__(self, prevout=None, scriptSig=CScript(), nSequence=0xffffffff,
-                 assetIssuance=CAssetIssuance):
-        super(CElementsSidechainTxIn, self).__init__(prevout, scriptSig, nSequence)
-        self.assetIssuance = assetIssuance
+                 assetIssuance=CAssetIssuance(), is_pegin=False):
+        if prevout is None:
+            prevout = CMutableOutPoint()
+        super(CElementsSidechainMutableTxIn, self).__init__(prevout, scriptSig, nSequence,
+                                                            assetIssuance, is_pegin)
 
     @classmethod
     def from_txin(cls, txin):
@@ -1063,8 +1091,8 @@ class CElementsSidechainTxOut(CTxOutBase, _ReprOrStrMixin):
 
     # nValue and scriptPubKey is first to be compatible with
     # CTxOut(nValue, scriptPubKey) calls
-    def __init__(self, nValue=CConfidentialValue, scriptPubKey=script.CScript(),
-                 nAsset=CConfidentialAsset, nNonce=CConfidentialNonce):
+    def __init__(self, nValue=CConfidentialValue(), scriptPubKey=script.CScript(),
+                 nAsset=CConfidentialAsset(), nNonce=CConfidentialNonce()):
         assert isinstance(nValue, CConfidentialValue)
         assert isinstance(nAsset, CConfidentialAsset)
         assert isinstance(nNonce, CConfidentialNonce)
@@ -1124,14 +1152,66 @@ class CElementsSidechainMutableTxOut(CElementsSidechainTxOut):
                    txout.nAsset, txout.nNonce)
 
 
-class CElementsSidechainMutableTransaction(CMutableTransactionBase):
+class CElementsSidechainTransactionCommon():
+
+    @classmethod
+    def stream_deserialize(cls, f):
+        """Deserialize transaction
+
+        This implementation corresponds to Elements's SerializeTransaction() and
+        consensus behavior. Note that Elements's DecodeHexTx() also has the
+        option to attempt deserializing as a non-witness transaction first,
+        falling back to the consensus behavior if it fails. The difference lies
+        in transactions which have zero inputs: they are invalid but may be
+        (de)serialized anyway for the purpose of signing them and adding
+        inputs. If the behavior of DecodeHexTx() is needed it could be added,
+        but not here.
+        """
+        # FIXME can't assume f is seekable
+        nVersion = struct.unpack(b"<i", ser_read(f, 4))[0]
+
+        markerbyte = 0
+        flagbyte = struct.unpack(b'B', ser_read(f, 1))[0]
+        if markerbyte == 0 and flagbyte == 1:
+            vin = VectorSerializer.stream_deserialize(cls._txin_class, f)
+            vout = VectorSerializer.stream_deserialize(cls._txout_class, f)
+            wit = cls._witness_class(tuple(0 for dummy in range(len(vin))),
+                                     tuple(0 for dummy in range(len(vout))))
+            # Note: nLockTime goes before witness in Elements sidechain transactions
+            nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
+            wit = wit.stream_deserialize(f)
+            return cls(vin, vout, nLockTime, nVersion, wit)
+        else:
+            vin = VectorSerializer.stream_deserialize(cls._txin_class, f)
+            vout = VectorSerializer.stream_deserialize(cls._txout_class, f)
+            nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
+            return cls(vin, vout, nLockTime, nVersion)
+
+    def stream_serialize(self, f, include_witness=True):
+        f.write(struct.pack(b"<i", self.nVersion))
+        if include_witness and not self.wit.is_null():
+            assert(len(self.wit.vtxinwit) == len(self.vin))
+            f.write(b'\x01')  # Flag
+            VectorSerializer.stream_serialize(self._txin_class, self.vin, f)
+            VectorSerializer.stream_serialize(self._txout_class, self.vout, f)
+            # Note: nLockTime goes before witness in Elements sidechain transactions
+            f.write(struct.pack(b"<I", self.nLockTime))
+            self.wit.stream_serialize(f)
+        else:
+            f.write(b'\x00')  # Flag is needed in Elements sidechain
+            VectorSerializer.stream_serialize(self._txin_class, self.vin, f)
+            VectorSerializer.stream_serialize(self._txout_class, self.vout, f)
+            f.write(struct.pack(b"<I", self.nLockTime))
+
+
+class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, CMutableTransactionBase):
     # _inverted_mutability_class will be set in _SelectAlternativeCoreParams
     _witness_class = CElementsSidechainTxWitness
     _txin_class = CElementsSidechainMutableTxIn
     _txout_class = CElementsSidechainMutableTxOut
 
 
-class CElementsSidechainTransaction(CImmutableTransactionBase):
+class CElementsSidechainTransaction(CElementsSidechainTransactionCommon, CImmutableTransactionBase):
     _inverted_mutability_class = CElementsSidechainMutableTransaction
     _witness_class = CElementsSidechainMutableTxWitness
     _txin_class = CElementsSidechainTxIn
@@ -1145,7 +1225,6 @@ class _ParamsTag():
 class CoreChainParams(object):
     """Define consensus-critical parameters of a given instance of the Bitcoin system"""
     MAX_MONEY = None
-    GENESIS_BLOCK = None
     PROOF_OF_WORK_LIMIT = None
     SUBSIDY_HALVING_INTERVAL = None
     NAME = None
@@ -1161,7 +1240,6 @@ class CoreMainParams(CoreChainParams, _ParamsTag):
 
 class CoreElementsSidechainParams(CoreMainParams, _ParamsTag):
     NAME = 'elements-sidechain'
-    GENESIS_BLOCK = None
     SUBSIDY_HALVING_INTERVAL = None
     PROOF_OF_WORK_LIMIT = None
     TRANSACTION_CLASS = CElementsSidechainTransaction
@@ -1268,6 +1346,35 @@ def GetLegacySigOpCount(tx):
     for txout in tx.vout:
         nSigOps += txout.scriptPubKey.GetSigOpCount(False)
     return nSigOps
+
+
+def GenerateAssetEntropy(prevout, contracthash):
+    assert isinstance(prevout, COutPoint)
+    assert isinstance(contracthash, (bytes, Uint256))
+    if isinstance(contracthash, Uint256):
+        contracthash = contracthash.data
+    assert len(contracthash) == 32
+    return Uint256(CSHA256().Write(prevout.GetHash()).Write(contracthash).Midstate())
+
+
+def CalculateAsset(entropy):
+    assert isinstance(entropy, (bytes, Uint256))
+    if isinstance(entropy, Uint256):
+        entropy = entropy.data
+    assert len(entropy) == 32
+    return CAsset(CSHA256().Write(entropy).Write(Uint256().data).Midstate())
+
+
+def CalculateReissuanceToken(entropy, is_confidential):
+    assert isinstance(entropy, (bytes, Uint256))
+    if isinstance(entropy, Uint256):
+        entropy = entropy.data
+    assert len(entropy) == 32
+    if is_confidential:
+        k = Uint256.from_int(2)
+    else:
+        k = Uint256.from_int(1)
+    return CAsset(CSHA256().Write(entropy).Write(k.data).Midstate())
 
 
 class _TransactionClassParamsBase():
@@ -1377,8 +1484,12 @@ __all__ = (
         'CheckTransactionError',
         'CheckTransaction',
         'GetLegacySigOpCount',
+        'Uint256',
         'CAsset',
         'CConfidentialAsset',
         'CConfidentialValue',
         'CConfidentialNonce',
+        'GenerateAssetEntropy',
+        'CalculateAsset',
+        'CalculateReissuanceToken',
 )
