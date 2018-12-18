@@ -1034,8 +1034,9 @@ class CElementsSidechainTxIn(CTxInBase, _ReprOrStrMixin):
                        txin.assetIssuance)
 
     def _repr_or_str(self, strfn):
-        return "CTxIn(%s, %s, 0x%x, %s)" % (strfn(self.prevout), repr(self.scriptSig),
-                                            self.nSequence, strfn(self.assetIssuance))
+        return "CTxIn(%s, %s, 0x%x, %s, %r)" % (strfn(self.prevout), repr(self.scriptSig),
+                                                self.nSequence, strfn(self.assetIssuance),
+                                                self.is_pegin)
 
 
 @__make_mutable
