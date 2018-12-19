@@ -2,7 +2,17 @@
 
 ## v0.10.4.dev0
 
-* ...
+* Elements sidechain support:
+
+    Confidential addresses
+
+    Confidential transaction serialization/deserialization
+
+* CTxWitness now is immutable, CMutableTxWitness is added.
+
+* Default transaction nVersion is now 2 (the same as in current Bitcoin Core)
+
+* A lot of refactoring and cleanup
 
 ## v0.10.3.post0
 
