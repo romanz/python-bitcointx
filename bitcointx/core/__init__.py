@@ -1222,10 +1222,11 @@ class _ParamsTag():
     pass
 
 
-class CoreChainParams(object):
+class CoreChainParams(object, metaclass=ABCMeta):
     """Define consensus-critical parameters of a given instance of the Bitcoin system"""
     MAX_MONEY = None
     NAME = None
+    TRANSACTION_CLASS = None
 
 
 class CoreMainParams(CoreChainParams, _ParamsTag):
@@ -1245,7 +1246,6 @@ class CoreTestNetParams(CoreMainParams, _ParamsTag):
 
 class CoreRegTestParams(CoreTestNetParams, _ParamsTag):
     NAME = 'regtest'
-    SUBSIDY_HALVING_INTERVAL = 150
 
 """Master global setting for what core chain params we're using"""
 coreparams = CoreMainParams()
