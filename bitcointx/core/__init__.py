@@ -640,7 +640,7 @@ class CBitcoinTransactionCommon():
 
 
 class CBitcoinMutableTransaction(CBitcoinTransactionCommon, CMutableTransactionBase):
-    # _inverted_mutability_class will be set in _SelectAlternativeCoreParams
+    # _inverted_mutability_class will be set in _SetTransactionClassParams
     _witness_class = CBitcoinMutableTxWitness
     _txin_class = CBitcoinMutableTxIn
     _txout_class = CBitcoinMutableTxOut
