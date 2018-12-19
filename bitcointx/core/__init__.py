@@ -1225,23 +1225,17 @@ class _ParamsTag():
 class CoreChainParams(object):
     """Define consensus-critical parameters of a given instance of the Bitcoin system"""
     MAX_MONEY = None
-    PROOF_OF_WORK_LIMIT = None
-    SUBSIDY_HALVING_INTERVAL = None
     NAME = None
 
 
 class CoreMainParams(CoreChainParams, _ParamsTag):
     MAX_MONEY = 21000000 * COIN
     NAME = 'mainnet'
-    SUBSIDY_HALVING_INTERVAL = 210000
-    PROOF_OF_WORK_LIMIT = 2**256-1 >> 32
     TRANSACTION_CLASS = CBitcoinTransaction
 
 
 class CoreElementsSidechainParams(CoreMainParams, _ParamsTag):
     NAME = 'elements-sidechain'
-    SUBSIDY_HALVING_INTERVAL = None
-    PROOF_OF_WORK_LIMIT = None
     TRANSACTION_CLASS = CElementsSidechainTransaction
 
 
@@ -1252,7 +1246,6 @@ class CoreTestNetParams(CoreMainParams, _ParamsTag):
 class CoreRegTestParams(CoreTestNetParams, _ParamsTag):
     NAME = 'regtest'
     SUBSIDY_HALVING_INTERVAL = 150
-    PROOF_OF_WORK_LIMIT = 2**256-1 >> 1
 
 """Master global setting for what core chain params we're using"""
 coreparams = CoreMainParams()
