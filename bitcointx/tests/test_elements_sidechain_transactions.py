@@ -16,8 +16,13 @@ import unittest
 import os
 
 import bitcointx
-from bitcointx.core import *
-from bitcointx.core.serialize import *
+from bitcointx.core import (
+    x, b2lx, b2x, COIN,
+    CTransaction, CTxIn, CMutableTxIn, CMutableTransaction
+)
+from bitcointx.sidechain.elements import (
+    CalculateAsset, GenerateAssetEntropy, CalculateReissuanceToken
+)
 from bitcointx.wallet import CBitcoinAddress
 
 
@@ -36,7 +41,7 @@ class ElementsSidechainTestSetupBase():
     @classmethod
     def setUpClass(cls):
         cls._prev_chain = bitcointx.params.NAME
-        bitcointx.SelectParams('elements-sidechain')
+        bitcointx.SelectParams('sidechain/elements')
 
     @classmethod
     def tearDownClass(cls):

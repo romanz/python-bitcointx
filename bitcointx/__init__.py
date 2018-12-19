@@ -11,7 +11,9 @@
 # LICENSE file.
 
 import sys
+
 import bitcointx.core
+import bitcointx.sidechain
 
 # Note that setup.py can break if __init__.py imports any external
 # dependencies, as these might not be installed when setup.py runs. In this
@@ -25,35 +27,19 @@ class _ParamsTag():
 
 class MainParams(bitcointx.core.CoreMainParams, _ParamsTag):
     RPC_PORT = 8332
-    BASE58_PREFIXES = {'PUBKEY_ADDR':0,
-                       'SCRIPT_ADDR':5,
-                       'SECRET_KEY' :128,
+    BASE58_PREFIXES = {'PUBKEY_ADDR': 0,
+                       'SCRIPT_ADDR': 5,
+                       'SECRET_KEY':  128,
                        'EXTENDED_PUBKEY': b'\x04\x88\xB2\x1E',
                        'EXTENDED_PRIVKEY': b'\x04\x88\xAD\xE4'}
     BECH32_HRP = 'bc'
 
 
-class ElementsSidechainParams(bitcointx.core.CoreElementsSidechainParams, _ParamsTag):
-    RPC_PORT = 7041
-    BASE58_PREFIXES = {'PUBKEY_ADDR' : 235,
-                       'SCRIPT_ADDR' : 75,
-                       'CONFIDENTIAL_ADDR': b'\x04',
-                       'CONFIDENTIAL_PUBKEY_ADDR': b'\x04\xEB',
-                       'CONFIDENTIAL_SCRIPT_ADDR': b'\x04\x4B',
-
-                       # Note: these are the same as for Bitcoin testnet
-                       'SECRET_KEY'  : 239,
-                       'EXTENDED_PUBKEY': b'\x04\x35\x87\xCF',
-                       'EXTENDED_PRIVKEY': b'\x04\x35\x83\x94'}
-
-    BECH32_HRP = None
-
-
 class TestNetParams(bitcointx.core.CoreTestNetParams, _ParamsTag):
     RPC_PORT = 18332
-    BASE58_PREFIXES = {'PUBKEY_ADDR':111,
-                       'SCRIPT_ADDR':196,
-                       'SECRET_KEY' :239,
+    BASE58_PREFIXES = {'PUBKEY_ADDR': 111,
+                       'SCRIPT_ADDR': 196,
+                       'SECRET_KEY':  239,
                        'EXTENDED_PUBKEY': b'\x04\x35\x87\xCF',
                        'EXTENDED_PRIVKEY': b'\x04\x35\x83\x94'}
     BECH32_HRP = 'tb'
@@ -61,9 +47,9 @@ class TestNetParams(bitcointx.core.CoreTestNetParams, _ParamsTag):
 
 class RegTestParams(bitcointx.core.CoreRegTestParams, _ParamsTag):
     RPC_PORT = 18443
-    BASE58_PREFIXES = {'PUBKEY_ADDR':111,
-                       'SCRIPT_ADDR':196,
-                       'SECRET_KEY' :239,
+    BASE58_PREFIXES = {'PUBKEY_ADDR': 111,
+                       'SCRIPT_ADDR': 196,
+                       'SECRET_KEY':  239,
                        'EXTENDED_PUBKEY': b'\x04\x35\x87\xCF',
                        'EXTENDED_PRIVKEY': b'\x04\x35\x83\x94'}
     BECH32_HRP = 'bcrt'
@@ -107,6 +93,11 @@ def SelectParams(name):
     Default chain is 'mainnet'
     """
     global params
+
+    if name.startswith('sidechain/'):
+        params_pair = bitcointx.sidechain.GetChainParams(name)
+        assert len(params_pair) == 2
+        return SelectAlternativeParams(*params_pair)
 
     bitcointx.core._SelectCoreParams(name)
 

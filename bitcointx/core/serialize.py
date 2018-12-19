@@ -9,6 +9,8 @@
 # propagated, or distributed except according to the terms contained in the
 # LICENSE file.
 
+# pylama:ignore=E501
+
 """Serialization routines
 
 You probabably don't need to use these directly.
@@ -25,6 +27,7 @@ MAX_SIZE = 0x02000000
 def Hash(msg):
     """SHA256^2)(msg) -> bytes"""
     return hashlib.sha256(hashlib.sha256(msg).digest()).digest()
+
 
 def Hash160(msg):
     """RIPEME160(SHA256(msg)) -> bytes"""
@@ -43,6 +46,7 @@ class SerializationTruncationError(SerializationError):
     Thrown by deserialize() and stream_deserialize()
     """
 
+
 class DeserializationExtraDataError(SerializationError):
     """Deserialized data had extra data at the end
 
@@ -54,6 +58,7 @@ class DeserializationExtraDataError(SerializationError):
         super(DeserializationExtraDataError, self).__init__(msg)
         self.obj = obj
         self.padding = padding
+
 
 def ser_read(f, n):
     """Read from a stream safely
@@ -113,8 +118,8 @@ class Serializable(object):
         return Hash(self.serialize())
 
     def __eq__(self, other):
-        if (not isinstance(other, self.__class__) and
-            not isinstance(self, other.__class__)):
+        if not isinstance(other, self.__class__)\
+                and not isinstance(self, other.__class__):
             return NotImplemented
         return self.serialize() == other.serialize()
 
@@ -154,6 +159,7 @@ class ImmutableSerializable(Serializable):
             _cached__hash__ = hash(self.serialize())
             object.__setattr__(self, '_cached__hash__', _cached__hash__)
             return _cached__hash__
+
 
 class Serializer(object):
     """Base class for object serializers"""
@@ -318,6 +324,7 @@ def uint256_from_compact(c):
         v = (c & 0xFFFFFF) << (8 * (nbytes - 3))
     return v
 
+
 def compact_from_uint256(v):
     """Convert uint256 to compact encoding
     """
@@ -337,36 +344,52 @@ def compact_from_uint256(v):
 
     return compact | nbytes << 24
 
+
 def uint256_to_str(u):
     r = b""
     for i in range(8):
         r += struct.pack('<I', u >> (i * 32) & 0xffffffff)
     return r
 
+
 def uint256_to_shortstr(u):
     s = "%064x" % (u,)
     return s[:16]
 
+
+def make_mutable(cls):
+    # For speed we use a class decorator that removes the immutable
+    # restrictions directly. In addition the modified behavior of GetHash() and
+    # hash() is undone.
+    cls.__setattr__ = object.__setattr__
+    cls.__delattr__ = object.__delattr__
+    cls.GetHash = Serializable.GetHash
+    cls.__hash__ = Serializable.__hash__
+    cls._immutable_restriction_lifted = True
+    return cls
+
+
 __all__ = (
-        'MAX_SIZE',
-        'Hash',
-        'Hash160',
-        'SerializationError',
-        'SerializationTruncationError',
-        'DeserializationExtraDataError',
-        'ser_read',
-        'Serializable',
-        'ImmutableSerializable',
-        'Serializer',
-        'VarIntSerializer',
-        'BytesSerializer',
-        'VectorSerializer',
-        'uint256VectorSerializer',
-        'intVectorSerializer',
-        'VarStringSerializer',
-        'uint256_from_str',
-        'uint256_from_compact',
-        'compact_from_uint256',
-        'uint256_to_str',
-        'uint256_to_shortstr',
+    'MAX_SIZE',
+    'Hash',
+    'Hash160',
+    'SerializationError',
+    'SerializationTruncationError',
+    'DeserializationExtraDataError',
+    'ser_read',
+    'Serializable',
+    'ImmutableSerializable',
+    'Serializer',
+    'VarIntSerializer',
+    'BytesSerializer',
+    'VectorSerializer',
+    'uint256VectorSerializer',
+    'intVectorSerializer',
+    'VarStringSerializer',
+    'uint256_from_str',
+    'uint256_from_compact',
+    'compact_from_uint256',
+    'uint256_to_str',
+    'uint256_to_shortstr',
+    'make_mutable',
 )
