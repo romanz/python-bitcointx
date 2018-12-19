@@ -279,7 +279,7 @@ class P2PKHBitcoinAddress(CBase58BitcoinAddress):
         return self.to_scriptPubKey()
 
 
-class BlindedBitcoinAddress(CBase58BitcoinAddress):
+class ConfidentialAddress(CBase58BitcoinAddress):
 
     @classmethod
     def _base58_submatch(cls, data, prefix):
@@ -288,15 +288,15 @@ class BlindedBitcoinAddress(CBase58BitcoinAddress):
             assert prefix == subclass.base58_prefix[:1]
             if data[0] == subclass.base58_prefix[1]:
                 return subclass, data[1:], subclass.base58_prefix
-        raise CBitcoinAddressError('Sub-version %d not a recognized blinded Bitcoin Address' % data[0])
+        raise CBitcoinAddressError('Sub-version %d not a recognized Confidential Address' % data[0])
 
     @classmethod
-    def from_unblinded(cls, unblinded_adr, blinding_pubkey):
-        """Convert unblinded address to blinded
+    def from_unconfidential(cls, unconfidential_adr, blinding_pubkey):
+        """Convert unconfidential address to confidential
 
         Raises CBitcoinAddressError if blinding_pubkey is invalid
 
-        unblinded_adr can be string or CBase58BitcoinAddress instance
+        unconfidential_adr can be string or CBase58BitcoinAddress instance
         blinding_pubkey must be a bytes instance
         """
         if not isinstance(blinding_pubkey, bytes):
@@ -306,18 +306,18 @@ class BlindedBitcoinAddress(CBase58BitcoinAddress):
         if not blinding_pubkey.is_fullyvalid:
             raise CBitcoinAddressError('invalid blinding pubkey')
 
-        if not isinstance(unblinded_adr, CBase58BitcoinAddress):
-            unblinded_adr = CBase58BitcoinAddress(unblinded_adr)
+        if not isinstance(unconfidential_adr, CBase58BitcoinAddress):
+            unconfidential_adr = CBase58BitcoinAddress(unconfidential_adr)
 
-        if len(cls.base58_prefix) > 1 and unblinded_adr.prefix != cls.base58_prefix[1:]:
-            raise CBitcoinAddressError('cannot create {} with unblinded {}'
-                                       .format(cls, unblinded_adr.__class__.__name__))
+        if len(cls.base58_prefix) > 1 and unconfidential_adr.prefix != cls.base58_prefix[1:]:
+            raise CBitcoinAddressError('cannot create {} from {}: inner prefix mismatch'
+                                       .format(cls, unconfidential_adr.__class__.__name__))
 
         return CBase58BitcoinAddress.from_bytes(
-            unblinded_adr.base58_prefix + blinding_pubkey + unblinded_adr,
+            unconfidential_adr.base58_prefix + blinding_pubkey + unconfidential_adr,
             cls.base58_prefix[0:1])
 
-    def to_unblinded(self):
+    def to_unconfidential(self):
         return CBase58BitcoinAddress.from_bytes(self[33:], self.base58_prefix[1:2])
 
     @property
@@ -325,11 +325,11 @@ class BlindedBitcoinAddress(CBase58BitcoinAddress):
         return bitcointx.core.key.CPubKey(self[0:33])
 
 
-class BlindedP2PKHBitcoinAddress(BlindedBitcoinAddress):
+class P2PKHConfidentialAddress(ConfidentialAddress):
     pass
 
 
-class BlindedP2SHBitcoinAddress(BlindedBitcoinAddress):
+class P2SHConfidentialAddress(ConfidentialAddress):
     pass
 
 
@@ -473,9 +473,9 @@ class CBitcoinExtKey(bitcointx.base58.CBase58PrefixedData, bitcointx.core.key.CE
 _Base58PrefixMap = {
     P2PKHBitcoinAddress: 'PUBKEY_ADDR',
     P2SHBitcoinAddress: 'SCRIPT_ADDR',
-    BlindedBitcoinAddress: 'BLINDED_ADDR',
-    BlindedP2PKHBitcoinAddress: 'BLINDED_PUBKEY_ADDR',
-    BlindedP2SHBitcoinAddress: 'BLINDED_SCRIPT_ADDR',
+    ConfidentialAddress: 'CONFIDENTIAL_ADDR',
+    P2PKHConfidentialAddress: 'CONFIDENTIAL_PUBKEY_ADDR',
+    P2SHConfidentialAddress: 'CONFIDENTIAL_SCRIPT_ADDR',
     CBitcoinSecret: 'SECRET_KEY',
     CBitcoinExtKey: 'EXTENDED_PRIVKEY',
     CBitcoinExtPubKey: 'EXTENDED_PUBKEY',
@@ -514,9 +514,9 @@ __all__ = (
         'P2PKHBitcoinAddress',
         'P2WSHBitcoinAddress',
         'P2WPKHBitcoinAddress',
-        'BlindedBitcoinAddress',
-        'BlindedP2SHBitcoinAddress',
-        'BlindedP2PKHBitcoinAddress',
+        'ConfidentialAddress',
+        'P2SHConfidentialAddress',
+        'P2PKHConfidentialAddress',
         'CBitcoinSecretError',
         'CBitcoinSecret',
         'CBitcoinExtKey',

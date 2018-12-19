@@ -37,9 +37,9 @@ class ElementsSidechainParams(bitcointx.core.CoreElementsSidechainParams, _Param
     RPC_PORT = 7041
     BASE58_PREFIXES = {'PUBKEY_ADDR' : 235,
                        'SCRIPT_ADDR' : 75,
-                       'BLINDED_ADDR': b'\x04',
-                       'BLINDED_PUBKEY_ADDR': b'\x04\xEB',
-                       'BLINDED_SCRIPT_ADDR': b'\x04\x4B',
+                       'CONFIDENTIAL_ADDR': b'\x04',
+                       'CONFIDENTIAL_PUBKEY_ADDR': b'\x04\xEB',
+                       'CONFIDENTIAL_SCRIPT_ADDR': b'\x04\x4B',
 
                        # Note: these are the same as for Bitcoin testnet
                        'SECRET_KEY'  : 239,
