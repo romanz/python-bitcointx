@@ -110,6 +110,7 @@ class CKeyMixin():
             secp256k1_context_sign, raw_pubkey, self.secret_bytes)
 
         if result != 1:
+            assert result == 0
             raise ValueError('Invalid private key data')
 
         self.pub = CPubKey._from_raw(raw_pubkey, compressed=compressed)
@@ -258,6 +259,7 @@ class CPubKey(bytes):
             secp256k1_context_verify, rec_sig, sig[1:], recid)
 
         if result != 1:
+            assert result == 0
             return False
 
         raw_pubkey = ctypes.create_string_buffer(64)
@@ -266,6 +268,7 @@ class CPubKey(bytes):
             secp256k1_context_verify, raw_pubkey, rec_sig, hash)
 
         if result != 1:
+            assert result == 0
             return False
 
         return cls._from_raw(raw_pubkey, compressed=compressed)
@@ -297,6 +300,7 @@ class CPubKey(bytes):
             secp256k1_context_verify, raw_sig, sig, len(sig))
 
         if result != 1:
+            assert result == 0
             return False
 
         secp256k1.secp256k1_ecdsa_signature_normalize(
@@ -452,6 +456,7 @@ class CExtKeyMixin(CExtKeyBase):
             secp256k1_context_sign, child_privkey, bip32_hash)
 
         if result != 1:
+            assert result == 0
             raise KeyDerivationFailException('extended privkey derivation failed')
 
         parent_fp = self.pub.key_id[:4]
@@ -508,6 +513,7 @@ class CExtPubKeyMixin(CExtKeyBase):
             secp256k1_context_verify, raw_pub, bip32_hash)
 
         if result != 1:
+            assert result == 0
             raise KeyDerivationFailException('extended pubkey derivation failed')
 
         child_pubkey_size0 = ctypes.c_size_t()

@@ -11,9 +11,10 @@
 
 # pylama:ignore=E501
 
-import json
-import unittest
 import os
+import json
+import logging
+import unittest
 
 import bitcointx
 from bitcointx.core import (
@@ -24,6 +25,19 @@ from bitcointx.sidechain.elements import (
     CalculateAsset, GenerateAssetEntropy, CalculateReissuanceToken
 )
 from bitcointx.wallet import CBitcoinAddress
+from bitcointx.core.secp256k1 import secp256k1_has_zkp
+
+zkp_unavailable_warning_shown = False
+
+
+def warn_zkp_unavailable():
+    global zkp_unavailable_warning_shown
+    if not zkp_unavailable_warning_shown:
+        log = logging.getLogger("Test_Elements_CTransaction")
+        log.warning(' secp256k1-zkp unavailable')
+        log.warning(' skipping rangeproof checks.')
+        log.warning(' If you do not need Elements sidechain funcionality, it is safe to ignore this warning.')
+        zkp_unavailable_warning_shown = True
 
 
 def load_test_vectors(name):
@@ -40,6 +54,7 @@ def load_test_vectors(name):
 class ElementsSidechainTestSetupBase():
     @classmethod
     def setUpClass(cls):
+        logging.basicConfig()
         cls._prev_chain = bitcointx.params.NAME
         bitcointx.SelectParams('sidechain/elements')
 
@@ -79,7 +94,7 @@ class Test_CMutableTxIn(ElementsSidechainTestSetupBase, unittest.TestCase):
         self.assertNotEqual(h1, txin.GetHash())
 
 
-class Test_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCase):
+class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCase):
     def test_is_coinbase(self):
         tx = CMutableTransaction()
         self.assertFalse(tx.is_coinbase())
@@ -136,8 +151,6 @@ class Test_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCase):
                                      tx.vout[n].nAsset.commitment)
                 if 'asset' in vout:
                     self.assertEqual(vout['asset'], tx.vout[n].nAsset.to_asset().id.to_hex())
-                if 'value' in vout:
-                    self.assertEqual(int(round(vout['value']*COIN)), tx.vout[n].nValue.to_amount())
                 if 'scriptPubKey' in vout:
                     spk = vout['scriptPubKey']
                     self.assertEqual(x(spk['hex']), tx.vout[n].scriptPubKey)
@@ -163,7 +176,29 @@ class Test_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCase):
                     else:
                         self.assertEqual(spk['type'], 'fee')
                         self.assertEqual(len(tx.vout[n].scriptPubKey), 0)
-                # TODO: test value-minimum, value-maximum, ct-exponent, ct-bits
+
+                if secp256k1_has_zkp:
+                    if tx.wit.is_null():
+                        rpinfo = None
+                    else:
+                        rpinfo = tx.wit.vtxoutwit[n].get_rangeproof_info()
+                    if 'value-minimum' in vout:
+                        self.assertIsNotNone(rpinfo)
+                        self.assertEqual(vout['ct-exponent'], rpinfo.exp)
+                        self.assertEqual(vout['ct-bits'], rpinfo.mantissa)
+                        self.assertEqual(int(round(vout['value-minimum']*COIN)), rpinfo.value_min)
+                        self.assertEqual(int(round(vout['value-maximum']*COIN)), rpinfo.value_max)
+                    else:
+                        self.assertTrue(rpinfo is None or rpinfo.exp == -1)
+                        if rpinfo is None:
+                            value = tx.vout[n].nValue.to_amount()
+                        else:
+                            value = rpinfo.value_min
+                        self.assertEqual(int(round(vout['value']*COIN)), value)
+                else:
+                    warn_zkp_unavailable()
+                    if 'value' in vout and tx.vout[n].nValue.is_explicit():
+                        self.assertEqual(int(round(vout['value']*COIN)), tx.vout[n].nValue.to_amount())
 
             for n, vin in enumerate(tx_decoded['vin']):
                 if 'scripSig' in vin:

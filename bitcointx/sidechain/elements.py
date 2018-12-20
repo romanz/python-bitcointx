@@ -11,16 +11,14 @@
 
 # pylama:ignore=E501
 
-# If this flag is set, the CTxIn including this COutPoint has a CAssetIssuance object.
-OUTPOINT_ISSUANCE_FLAG = (1 << 31)
-# If this flag is set, the CTxIn including this COutPoint is a peg-in input.
-OUTPOINT_PEGIN_FLAG = (1 << 30)
-# The inverse of the combination of the preceeding flags. Used to
-# extract the original meaning of `n` as the index into the
-# transaction's output array. */
-OUTPOINT_INDEX_MASK = 0x3fffffff
-
 import struct
+import ctypes
+from collections import namedtuple
+
+from bitcointx.core.secp256k1 import (
+    secp256k1, secp256k1_has_zkp,
+    secp256k1_context_blind
+)
 
 from bitcointx.core import (
     CoreMainParams, Uint256,
@@ -36,6 +34,15 @@ from bitcointx.core.serialize import (
     BytesSerializer, VectorSerializer,
     ser_read, make_mutable
 )
+
+# If this flag is set, the CTxIn including this COutPoint has a CAssetIssuance object.
+OUTPOINT_ISSUANCE_FLAG = (1 << 31)
+# If this flag is set, the CTxIn including this COutPoint is a peg-in input.
+OUTPOINT_PEGIN_FLAG = (1 << 30)
+# The inverse of the combination of the preceeding flags. Used to
+# extract the original meaning of `n` as the index into the
+# transaction's output array. */
+OUTPOINT_INDEX_MASK = 0x3fffffff
 
 
 class WitnessSerializationError(SerializationError):
@@ -241,32 +248,54 @@ class CElementsSidechainTxInWitness(CTxInWitnessBase, ReprOrStrMixin):
 
 class CElementsSidechainTxOutWitness(CTxOutWitnessBase):
     """Witness data for a single transaction output of elements sidechain transaction"""
-    __slots__ = ['surjectionProof', 'rangeproof']
+    __slots__ = ['surjectionproof', 'rangeproof']
 
-    def __init__(self, surjectionProof=b'', rangeproof=b''):
-        assert isinstance(surjectionProof, bytes)
+    def __init__(self, surjectionproof=b'', rangeproof=b''):
+        assert isinstance(surjectionproof, bytes)
         assert isinstance(rangeproof, bytes)
-        object.__setattr__(self, 'surjectionProof', CScript(surjectionProof))
+        object.__setattr__(self, 'surjectionproof', CScript(surjectionproof))
         object.__setattr__(self, 'rangeproof', CScript(rangeproof))
 
     def is_null(self):
-        return not len(self.surjectionProof) and not len(self.rangeproof)
+        return not len(self.surjectionproof) and not len(self.rangeproof)
 
     @classmethod
     def stream_deserialize(cls, f):
-        surjectionProof = CScript(BytesSerializer.stream_deserialize(f))
+        surjectionproof = CScript(BytesSerializer.stream_deserialize(f))
         rangeproof = CScript(BytesSerializer.stream_deserialize(f))
-        return cls(surjectionProof, rangeproof)
+        return cls(surjectionproof, rangeproof)
 
     def stream_serialize(self, f):
-        BytesSerializer.stream_serialize(self.surjectionProof, f)
+        BytesSerializer.stream_serialize(self.surjectionproof, f)
         BytesSerializer.stream_serialize(self.rangeproof, f)
+
+    def get_rangeproof_info(self):
+        if not secp256k1_has_zkp:
+            raise RuntimeError('secp256k1-zkp library is not available. '
+                               ' get_rangeproof_info is not functional.')
+
+        exp = ctypes.c_int()
+        mantissa = ctypes.c_int()
+        value_min = ctypes.c_uint64()
+        value_max = ctypes.c_uint64()
+        result = secp256k1.secp256k1_rangeproof_info(
+            secp256k1_context_blind,
+            ctypes.byref(exp), ctypes.byref(mantissa),
+            ctypes.byref(value_min), ctypes.byref(value_max),
+            self.rangeproof, len(self.rangeproof)
+        )
+        if result != 1:
+            assert result == 0
+            return None
+
+        return ZKPRangeproofInfo(exp=exp.value, mantissa=mantissa.value,
+                                 value_min=value_min.value, value_max=value_max.value)
 
     def __repr__(self):
         if self.is_null():
             return "CTxOutWitness()"
         return "CTxOutWitness({}, {})".format(
-            bytes_for_repr(self.surjectionProof),
+            bytes_for_repr(self.surjectionproof),
             bytes_for_repr(self.rangeproof))
 
 
@@ -651,6 +680,8 @@ def CalculateReissuanceToken(entropy, is_confidential):
     else:
         k = Uint256.from_int(1)
     return CAsset(CSHA256().Write(entropy).Write(k.data).Midstate())
+
+ZKPRangeproofInfo = namedtuple('ZKPRangeproofInfo', 'exp mantissa value_min value_max')
 
 
 def GetChainParams(name):

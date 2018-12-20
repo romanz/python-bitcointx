@@ -13,10 +13,10 @@
 
 import os
 import ctypes
+import ctypes.util
 import threading
 
-secp256k1_library_name = os.environ.get('PYTHON_BITCOINTX_SECP256K1_LIBNAME', 'secp256k1')
-secp256k1 = ctypes.cdll.LoadLibrary(ctypes.util.find_library(secp256k1_library_name))
+secp256k1 = ctypes.cdll.LoadLibrary(ctypes.util.find_library('secp256k1'))
 
 PUBLIC_KEY_SIZE             = 65
 COMPRESSED_PUBLIC_KEY_SIZE  = 33
@@ -103,6 +103,17 @@ if getattr(secp256k1, 'secp256k1_ecdsa_sign_recoverable', None):
     secp256k1.secp256k1_ecdsa_recoverable_signature_parse_compact.restype = ctypes.c_int
     secp256k1.secp256k1_ecdsa_recoverable_signature_parse_compact.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
 
+secp256k1_has_zkp = False
+if getattr(secp256k1, 'secp256k1_rangeproof_info', None):
+    secp256k1_has_zkp = True
+    secp256k1.secp256k1_rangeproof_info.restype = ctypes.c_int
+    secp256k1.secp256k1_rangeproof_info.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+        ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64),
+        ctypes.c_char_p, ctypes.c_size_t
+    ]
+
 secp256k1.secp256k1_ec_pubkey_serialize.restype = ctypes.c_int
 secp256k1.secp256k1_ec_pubkey_serialize.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_size_t), ctypes.c_char_p, ctypes.c_uint]
 
@@ -132,27 +143,41 @@ assert secp256k1_context_sign is not None
 secp256k1_context_verify = secp256k1.secp256k1_context_create(SECP256K1_CONTEXT_VERIFY)
 assert secp256k1_context_verify is not None
 
-secp256k1.secp256k1_context_set_error_callback(secp256k1_context_sign, _secp256k1_error_callback_fn, 0)
-secp256k1.secp256k1_context_set_illegal_callback(secp256k1_context_sign, _secp256k1_illegal_callback_fn, 0)
-secp256k1.secp256k1_context_set_error_callback(secp256k1_context_verify, _secp256k1_error_callback_fn, 0)
-secp256k1.secp256k1_context_set_illegal_callback(secp256k1_context_verify, _secp256k1_illegal_callback_fn, 0)
+
+def _set_error_callback(ctx):
+    secp256k1.secp256k1_context_set_error_callback(ctx, _secp256k1_error_callback_fn, 0)
+    secp256k1.secp256k1_context_set_illegal_callback(ctx, _secp256k1_illegal_callback_fn, 0)
+
+_set_error_callback(secp256k1_context_sign)
+_set_error_callback(secp256k1_context_verify)
 
 
-def randomize_contexts():
+def randomize_context(ctx):
     seed = os.urandom(32)
-    assert(secp256k1.secp256k1_context_randomize(secp256k1_context_sign, seed) == 1)
+    assert(secp256k1.secp256k1_context_randomize(ctx, seed) == 1)
 
-randomize_contexts()
+randomize_context(secp256k1_context_sign)
+
+secp256k1_context_blind = None
+if secp256k1_has_zkp:
+    secp256k1_context_blind = secp256k1.secp256k1_context_create(
+        SECP256K1_CONTEXT_SIGN | SECP256K1_CONTEXT_VERIFY)
+    assert secp256k1_context_blind is not None
+    _set_error_callback(secp256k1_context_blind)
+    randomize_context(secp256k1_context_blind)
+
 
 __all__ = (
     'secp256k1',
     'secp256k1_context_sign',
     'secp256k1_context_verify',
+    'secp256k1_context_blind',
     'SIGNATURE_SIZE',
     'COMPACT_SIGNATURE_SIZE',
     'PUBLIC_KEY_SIZE',
     'COMPRESSED_PUBLIC_KEY_SIZE',
     'SECP256K1_EC_COMPRESSED',
     'SECP256K1_EC_UNCOMPRESSED',
-    'secp256k1_has_pubkey_recovery'
+    'secp256k1_has_pubkey_recovery',
+    'secp256k1_has_zkp',
 )
