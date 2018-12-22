@@ -273,6 +273,23 @@ class CPubKey(bytes):
 
         return cls._from_raw(raw_pubkey, compressed=compressed)
 
+    # NOTE: other classes have is_valid() as method, but here it
+    # (and other is_ attributes) is a @property. This is inconsistent,
+    # but fixing this is dangerous: If we make is_valid here a method,
+    # and some old code that expects is_valid to be a property,
+    # will do 'if pub.is_valid:' -- this condition will always be true.
+    # This will lead to bugs.
+    # Changing is_* methods in other classes to @property is also bad option:
+    # it will probably break a lot of code unnecessary, and may introduce
+    # same subtle bugs: if the code that is adapted for the case where
+    # all is_* is a @property, is then used with other libraries derived
+    # from python-bitcoinlib, where were no such changes.
+    #
+    # Status quo is less dangerous: pub.is_valid() will just throw TypeError.
+    #
+    # One option may be to return a wrapped bool object that will also act
+    # as callable, but the scale of this problem with inconsistent interface
+    # for CPubKey seems to be not that huge to require such hacky fix.
     @property
     def is_valid(self):
         return len(self) > 0
