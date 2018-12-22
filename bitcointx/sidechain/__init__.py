@@ -18,7 +18,7 @@ import sys
 from importlib import import_module
 
 
-def GetChainParams(name):
+def get_chain_params(name):
     assert name.startswith('sidechain/')
     sc_name = name.split('/', maxsplit=1)[1]
 
@@ -27,8 +27,8 @@ def GetChainParams(name):
 
     mname = 'bitcointx.sidechain.{}'.format(sc_name)
     import_module(mname)
-    coreparams, params = sys.modules[mname].GetChainParams(name)
+    coreparams, params = sys.modules[mname].get_chain_params(name)
     assert coreparams.NAME == name
     return (coreparams, params)
 
-__all__ = ('GetAlternativeParams')
+__all__ = ('get_chain_params')

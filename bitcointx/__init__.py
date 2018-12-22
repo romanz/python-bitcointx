@@ -93,7 +93,7 @@ def SelectParams(name):
     Default chain is 'mainnet'
     """
     if name.startswith('sidechain/'):
-        params_pair = bitcointx.sidechain.GetChainParams(name)
+        params_pair = bitcointx.sidechain.get_chain_params(name)
         assert len(params_pair) == 2
         return SelectAlternativeParams(*params_pair)
 

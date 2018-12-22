@@ -31,7 +31,7 @@ from bitcointx.core.secp256k1 import (
     SIGNATURE_SIZE, COMPACT_SIGNATURE_SIZE,
     PUBLIC_KEY_SIZE, COMPRESSED_PUBLIC_KEY_SIZE,
     SECP256K1_EC_COMPRESSED, SECP256K1_EC_UNCOMPRESSED,
-    secp256k1_has_pubkey_recovery
+    secp256k1_has_pubkey_recovery, secp256k1_has_ecdh
 )
 
 try:
@@ -180,6 +180,24 @@ class CKeyMixin():
     def verify_nonstrict(self, hash, sig):
         return self.pub.verify_nonstrict(hash, sig)
 
+    def ECDH(self, pub=None):
+        if not secp256k1_has_ecdh:
+            raise RuntimeError(
+                'secp256k1 compiled without ECDH shared secret computation functions. '
+                'ECDH is not functional.')
+
+        if pub is None:
+            pub = self.pub
+
+        if not pub.is_fullyvalid:
+            raise ValueError('supplied pubkey is not valid')
+
+        result_data = ctypes.create_string_buffer(32)
+        ret = secp256k1.secp256k1_ecdh(secp256k1_context_sign, result_data, pub._to_raw(), self,
+                                       None, None)
+        assert ret == 1
+        return bytes(result_data)
+
 
 class CKey(bytes, CKeyMixin):
     "Standalone privkey class"
@@ -208,7 +226,7 @@ class CPubKey(bytes):
     key_id        - Hash160(pubkey)
     """
 
-    def __new__(cls, buf):
+    def __new__(cls, buf=b''):
         self = super(CPubKey, cls).__new__(cls, buf)
 
         self.is_fullyvalid = False
@@ -237,7 +255,7 @@ class CPubKey(bytes):
         return CPubKey(bytes(pub)[:pub_size0.value])
 
     def _to_raw(self):
-        assert self.is_valid
+        assert self.is_fullyvalid
         raw_pub = ctypes.create_string_buffer(64)
         result = secp256k1.secp256k1_ec_pubkey_parse(
             secp256k1_context_verify, raw_pub, self, len(self))

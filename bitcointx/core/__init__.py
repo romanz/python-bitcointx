@@ -206,9 +206,13 @@ class COutPoint(ImmutableSerializable):
 
     def __repr__(self):
         if self.is_null():
-            return 'COutPoint()'
+            return 'C%sOutPoint()' % (
+                'Mutable' if self._immutable_restriction_lifted else '',
+            )
         else:
-            return 'COutPoint(lx(%r), %i)' % (b2lx(self.hash), self.n)
+            return 'C%sOutPoint(lx(%r), %i)' % (
+                'Mutable' if self._immutable_restriction_lifted else '',
+                b2lx(self.hash), self.n)
 
     def __str__(self):
         return '%s:%i' % (b2lx(self.hash), self.n)
@@ -281,7 +285,9 @@ class CBitcoinTxIn(CTxInBase):
             return cls(COutPoint.from_outpoint(txin.prevout), txin.scriptSig, txin.nSequence)
 
     def __repr__(self):
-        return "CTxIn(%s, %s, 0x%x)" % (repr(self.prevout), repr(self.scriptSig), self.nSequence)
+        return "C%sTxIn(%s, %s, 0x%x)" % (
+            'Mutable' if self._immutable_restriction_lifted else '',
+            repr(self.prevout), repr(self.scriptSig), self.nSequence)
 
 
 @make_mutable
@@ -335,7 +341,9 @@ class CBitcoinTxOut(CTxOutBase):
         return True
 
     def __repr__(self):
-        return "CTxOut(%s, %r)" % (str_money_value_for_repr(self.nValue), self.scriptPubKey)
+        return "C%sTxOut(%s, %r)" % (
+            'Mutable' if self._immutable_restriction_lifted else '',
+            str_money_value_for_repr(self.nValue), self.scriptPubKey)
 
     @classmethod
     def from_txout(cls, txout):
@@ -382,8 +390,26 @@ class CBitcoinTxInWitness(CTxInWitnessBase):
     def stream_serialize(self, f):
         self.scriptWitness.stream_serialize(f)
 
+    @classmethod
+    def from_txin_witness(cls, txin_witness):
+        if not txin_witness._immutable_restriction_lifted:
+            # txin_witness is immutable, therefore returning same txin_witness is OK
+            return txin_witness
+        return cls(txin_witness.scriptWitness)
+
     def __repr__(self):
-        return "CTxInWitness(%s)" % (repr(self.scriptWitness))
+        return "C%sTxInWitness(%s)" % (
+            'Mutable' if self._immutable_restriction_lifted else '',
+            repr(self.scriptWitness))
+
+
+@make_mutable
+class CBitcoinMutableTxInWitness(CBitcoinTxInWitness):
+
+    @classmethod
+    def from_txin_witness(cls, txin_witness):
+        """Create a mutable copy of an existing COutPoint"""
+        return cls(txin_witness.scriptWitness)
 
 
 class CTxOutWitnessBase(ImmutableSerializable):
@@ -432,13 +458,16 @@ class CBitcoinTxWitness(CTxWitnessBase):
         return cls(witness.vtxinwit)
 
     def __repr__(self):
-        return "CTxWitness([%s])" % (','.join(repr(w) for w in self.vtxinwit))
+        return "C%sTxWitness([%s])" % (
+            'Mutable' if self._immutable_restriction_lifted else '',
+            ','.join(repr(w) for w in self.vtxinwit))
 
 
 @make_mutable
 class CBitcoinMutableTxWitness(CBitcoinTxWitness):
     """Witness data for all inputs to a transaction, mutable version"""
     __slots__ = []
+    _txin_witness_class = CBitcoinMutableTxInWitness
 
     def __init__(self, vtxinwit=(), vtxoutwit=None):
         # Note: vtxoutwit is ignored, does not exist for bitcon tx witness
@@ -489,9 +518,10 @@ class CTransactionBase(ImmutableSerializable, ReprOrStrMixin):
         return not self.wit.is_null()
 
     def _repr_or_str(self, strfn):
-        return "CTransaction(%r, %r, %i, %i, %r)" % ([strfn(v) for v in self.vin],
-                                                     [strfn(v) for v in self.vout],
-                                                     self.nLockTime, self.nVersion, strfn(self.wit))
+        return "C%sTransaction(%s, %s, %i, %i, %s)" % (
+            'Mutable' if self._immutable_restriction_lifted else '',
+            ', '.join(strfn(v) for v in self.vin), ', '.join(strfn(v) for v in self.vout),
+            self.nLockTime, self.nVersion, strfn(self.wit))
 
     def GetTxid(self):
         """Get the transaction ID.  This differs from the transactions hash as
@@ -554,10 +584,13 @@ class CMutableTransactionBase(CTransactionBase):
         self.vout = vout
         self.nVersion = nVersion
 
+        wclass = self._witness_class
         if witness is None:
-            wclass = self._witness_class
             witness = wclass([wclass._txin_witness_class() for dummy in range(len(vin))],
                              [wclass._txout_witness_class() for dummy in range(len(vout))])
+        else:
+            witness = wclass.from_witness(witness)
+
         self.wit = witness
 
     @classmethod

@@ -12,6 +12,8 @@
 
 * Default transaction nVersion is now 2 (the same as in current Bitcoin Core)
 
+* CPubKey() can be instantiated without parameters (will return invalid pubkey instance)
+
 * A lot of refactoring and cleanup
 
 ## v0.10.3.post0
