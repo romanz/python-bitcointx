@@ -26,7 +26,9 @@ from io import BytesIO
 import bitcointx.core
 import bitcointx.core._bignum
 
-from .serialize import *
+from .serialize import VarIntSerializer, BytesSerializer, ImmutableSerializable
+
+_script_class_params = {}  # to be filled by _SetScriptClassParams()
 
 MAX_SCRIPT_SIZE = 10000
 MAX_SCRIPT_ELEMENT_SIZE = 520
@@ -508,7 +510,7 @@ class CScriptTruncatedPushDataError(CScriptInvalidError):
         super(CScriptTruncatedPushDataError, self).__init__(msg)
 
 
-class CScript(bytes):
+class CScriptBase(bytes):
     """Serialized script
 
     A bytes subclass, so you can use this directly whenever bytes are accepted.
@@ -541,7 +543,7 @@ class CScript(bytes):
 
         try:
             # bytes.__add__ always returns bytes instances unfortunately
-            return CScript(super(CScript, self).__add__(other))
+            return CScript(super(CScriptBase, self).__add__(other))
         except TypeError:
             raise TypeError('Can not add a %r instance to a CScript' % other.__class__)
 
@@ -551,14 +553,14 @@ class CScript(bytes):
 
     def __new__(cls, value=b''):
         if isinstance(value, bytes) or isinstance(value, bytearray):
-            return super(CScript, cls).__new__(cls, value)
+            return super(CScriptBase, cls).__new__(cls, value)
         else:
             def coerce_iterable(iterable):
                 for instance in iterable:
                     yield cls.__coerce_instance(instance)
             # Annoyingly on both python2 and python3 bytes.join() always
             # returns a bytes instance even when subclassed.
-            return super(CScript, cls).__new__(cls, b''.join(coerce_iterable(value)))
+            return super(CScriptBase, cls).__new__(cls, b''.join(coerce_iterable(value)))
 
     def raw_iter(self):
         """Raw iteration
@@ -1076,149 +1078,178 @@ def SignatureHash(script, txTo, inIdx, hashtype, amount=0, sigversion=SIGVERSION
     return h
 
 
+class _ScriptClassParamsBase():
+    def __new__(cls, *args, **kwargs):
+        real_class = _script_class_params[cls]
+        return real_class(*args, **kwargs)
+
+
+class _ScriptClassParamsMeta(type):
+    def __new__(cls, name, bases, dct):
+        bases = [_ScriptClassParamsBase] + list(bases)
+        return super(_ScriptClassParamsMeta, cls).__new__(cls, name, tuple(bases), dct)
+
+    def __getattr__(cls, name):
+        real_class = _script_class_params[cls]
+        return getattr(real_class, name)
+
+
+class CScript(metaclass=_ScriptClassParamsMeta):
+    pass
+
+
+class CBitcoinScript(CScriptBase):
+    pass
+
+
+def _SetScriptClassParams(script_cls):
+    _script_class_params[CScript] = script_cls
+
+_SetScriptClassParams(CBitcoinScript)
+
 __all__ = (
-        'MAX_SCRIPT_SIZE',
-        'MAX_SCRIPT_ELEMENT_SIZE',
-        'MAX_SCRIPT_OPCODES',
-        'OPCODE_NAMES',
-        'CScriptOp',
+    'MAX_SCRIPT_SIZE',
+    'MAX_SCRIPT_ELEMENT_SIZE',
+    'MAX_SCRIPT_OPCODES',
+    'OPCODE_NAMES',
+    'CScriptOp',
 
-        # every opcode
-        'OP_0',
-        'OP_FALSE',
-        'OP_PUSHDATA1',
-        'OP_PUSHDATA2',
-        'OP_PUSHDATA4',
-        'OP_1NEGATE',
-        'OP_RESERVED',
-        'OP_1',
-        'OP_TRUE',
-        'OP_2',
-        'OP_3',
-        'OP_4',
-        'OP_5',
-        'OP_6',
-        'OP_7',
-        'OP_8',
-        'OP_9',
-        'OP_10',
-        'OP_11',
-        'OP_12',
-        'OP_13',
-        'OP_14',
-        'OP_15',
-        'OP_16',
-        'OP_NOP',
-        'OP_VER',
-        'OP_IF',
-        'OP_NOTIF',
-        'OP_VERIF',
-        'OP_VERNOTIF',
-        'OP_ELSE',
-        'OP_ENDIF',
-        'OP_VERIFY',
-        'OP_RETURN',
-        'OP_TOALTSTACK',
-        'OP_FROMALTSTACK',
-        'OP_2DROP',
-        'OP_2DUP',
-        'OP_3DUP',
-        'OP_2OVER',
-        'OP_2ROT',
-        'OP_2SWAP',
-        'OP_IFDUP',
-        'OP_DEPTH',
-        'OP_DROP',
-        'OP_DUP',
-        'OP_NIP',
-        'OP_OVER',
-        'OP_PICK',
-        'OP_ROLL',
-        'OP_ROT',
-        'OP_SWAP',
-        'OP_TUCK',
-        'OP_CAT',
-        'OP_SUBSTR',
-        'OP_LEFT',
-        'OP_RIGHT',
-        'OP_SIZE',
-        'OP_INVERT',
-        'OP_AND',
-        'OP_OR',
-        'OP_XOR',
-        'OP_EQUAL',
-        'OP_EQUALVERIFY',
-        'OP_RESERVED1',
-        'OP_RESERVED2',
-        'OP_1ADD',
-        'OP_1SUB',
-        'OP_2MUL',
-        'OP_2DIV',
-        'OP_NEGATE',
-        'OP_ABS',
-        'OP_NOT',
-        'OP_0NOTEQUAL',
-        'OP_ADD',
-        'OP_SUB',
-        'OP_MUL',
-        'OP_DIV',
-        'OP_MOD',
-        'OP_LSHIFT',
-        'OP_RSHIFT',
-        'OP_BOOLAND',
-        'OP_BOOLOR',
-        'OP_NUMEQUAL',
-        'OP_NUMEQUALVERIFY',
-        'OP_NUMNOTEQUAL',
-        'OP_LESSTHAN',
-        'OP_GREATERTHAN',
-        'OP_LESSTHANOREQUAL',
-        'OP_GREATERTHANOREQUAL',
-        'OP_MIN',
-        'OP_MAX',
-        'OP_WITHIN',
-        'OP_RIPEMD160',
-        'OP_SHA1',
-        'OP_SHA256',
-        'OP_HASH160',
-        'OP_HASH256',
-        'OP_CODESEPARATOR',
-        'OP_CHECKSIG',
-        'OP_CHECKSIGVERIFY',
-        'OP_CHECKMULTISIG',
-        'OP_CHECKMULTISIGVERIFY',
-        'OP_NOP1',
-        'OP_NOP2',
-        'OP_CHECKLOCKTIMEVERIFY',
-        'OP_NOP3',
-        'OP_NOP4',
-        'OP_NOP5',
-        'OP_NOP6',
-        'OP_NOP7',
-        'OP_NOP8',
-        'OP_NOP9',
-        'OP_NOP10',
-        'OP_SMALLINTEGER',
-        'OP_PUBKEYS',
-        'OP_PUBKEYHASH',
-        'OP_PUBKEY',
-        'OP_INVALIDOPCODE',
+    # every opcode
+    'OP_0',
+    'OP_FALSE',
+    'OP_PUSHDATA1',
+    'OP_PUSHDATA2',
+    'OP_PUSHDATA4',
+    'OP_1NEGATE',
+    'OP_RESERVED',
+    'OP_1',
+    'OP_TRUE',
+    'OP_2',
+    'OP_3',
+    'OP_4',
+    'OP_5',
+    'OP_6',
+    'OP_7',
+    'OP_8',
+    'OP_9',
+    'OP_10',
+    'OP_11',
+    'OP_12',
+    'OP_13',
+    'OP_14',
+    'OP_15',
+    'OP_16',
+    'OP_NOP',
+    'OP_VER',
+    'OP_IF',
+    'OP_NOTIF',
+    'OP_VERIF',
+    'OP_VERNOTIF',
+    'OP_ELSE',
+    'OP_ENDIF',
+    'OP_VERIFY',
+    'OP_RETURN',
+    'OP_TOALTSTACK',
+    'OP_FROMALTSTACK',
+    'OP_2DROP',
+    'OP_2DUP',
+    'OP_3DUP',
+    'OP_2OVER',
+    'OP_2ROT',
+    'OP_2SWAP',
+    'OP_IFDUP',
+    'OP_DEPTH',
+    'OP_DROP',
+    'OP_DUP',
+    'OP_NIP',
+    'OP_OVER',
+    'OP_PICK',
+    'OP_ROLL',
+    'OP_ROT',
+    'OP_SWAP',
+    'OP_TUCK',
+    'OP_CAT',
+    'OP_SUBSTR',
+    'OP_LEFT',
+    'OP_RIGHT',
+    'OP_SIZE',
+    'OP_INVERT',
+    'OP_AND',
+    'OP_OR',
+    'OP_XOR',
+    'OP_EQUAL',
+    'OP_EQUALVERIFY',
+    'OP_RESERVED1',
+    'OP_RESERVED2',
+    'OP_1ADD',
+    'OP_1SUB',
+    'OP_2MUL',
+    'OP_2DIV',
+    'OP_NEGATE',
+    'OP_ABS',
+    'OP_NOT',
+    'OP_0NOTEQUAL',
+    'OP_ADD',
+    'OP_SUB',
+    'OP_MUL',
+    'OP_DIV',
+    'OP_MOD',
+    'OP_LSHIFT',
+    'OP_RSHIFT',
+    'OP_BOOLAND',
+    'OP_BOOLOR',
+    'OP_NUMEQUAL',
+    'OP_NUMEQUALVERIFY',
+    'OP_NUMNOTEQUAL',
+    'OP_LESSTHAN',
+    'OP_GREATERTHAN',
+    'OP_LESSTHANOREQUAL',
+    'OP_GREATERTHANOREQUAL',
+    'OP_MIN',
+    'OP_MAX',
+    'OP_WITHIN',
+    'OP_RIPEMD160',
+    'OP_SHA1',
+    'OP_SHA256',
+    'OP_HASH160',
+    'OP_HASH256',
+    'OP_CODESEPARATOR',
+    'OP_CHECKSIG',
+    'OP_CHECKSIGVERIFY',
+    'OP_CHECKMULTISIG',
+    'OP_CHECKMULTISIGVERIFY',
+    'OP_NOP1',
+    'OP_NOP2',
+    'OP_CHECKLOCKTIMEVERIFY',
+    'OP_NOP3',
+    'OP_NOP4',
+    'OP_NOP5',
+    'OP_NOP6',
+    'OP_NOP7',
+    'OP_NOP8',
+    'OP_NOP9',
+    'OP_NOP10',
+    'OP_SMALLINTEGER',
+    'OP_PUBKEYS',
+    'OP_PUBKEYHASH',
+    'OP_PUBKEY',
+    'OP_INVALIDOPCODE',
 
-        'OPCODES_BY_NAME',
-        'DISABLED_OPCODES',
-        'CScriptInvalidError',
-        'CScriptTruncatedPushDataError',
-        'CScript',
-        'CScriptWitness',
-        'SIGHASH_ALL',
-        'SIGHASH_NONE',
-        'SIGHASH_SINGLE',
-        'SIGHASH_ANYONECANPAY',
-        'FindAndDelete',
-        'RawSignatureHash',
-        'SignatureHash',
-        'IsLowDERSignature',
+    'OPCODES_BY_NAME',
+    'DISABLED_OPCODES',
+    'CScriptInvalidError',
+    'CScriptTruncatedPushDataError',
+    'CScript',
+    'CScriptWitness',
+    'SIGHASH_ALL',
+    'SIGHASH_NONE',
+    'SIGHASH_SINGLE',
+    'SIGHASH_ANYONECANPAY',
+    'FindAndDelete',
+    'RawSignatureHash',
+    'SignatureHash',
+    'IsLowDERSignature',
 
-        'SIGVERSION_BASE',
-        'SIGVERSION_WITNESS_V0',
+    'SIGVERSION_BASE',
+    'SIGVERSION_WITNESS_V0',
 )

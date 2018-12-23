@@ -15,7 +15,7 @@ import binascii
 import struct
 from abc import ABCMeta, abstractmethod
 
-from .script import CScript, CScriptWitness, OP_RETURN
+from . import script
 
 from .serialize import (
     ImmutableSerializable,
@@ -29,7 +29,7 @@ COIN = 100000000
 MAX_BLOCK_SIZE = 1000000
 MAX_BLOCK_WEIGHT = 4000000
 MAX_BLOCK_SIGOPS = MAX_BLOCK_SIZE/50
-WITNESS_COINBASE_SCRIPTPUBKEY_MAGIC = bytes([OP_RETURN, 0x24, 0xaa, 0x21, 0xa9, 0xed])
+WITNESS_COINBASE_SCRIPTPUBKEY_MAGIC = bytes([script.OP_RETURN, 0x24, 0xaa, 0x21, 0xa9, 0xed])
 BIP32_HARDENED_KEY_LIMIT = 0x80000000
 
 
@@ -245,7 +245,7 @@ class CTxInBase(ImmutableSerializable):
     """
     __slots__ = ['prevout', 'scriptSig', 'nSequence']
 
-    def __init__(self, prevout=COutPoint(), scriptSig=CScript(), nSequence=0xffffffff):
+    def __init__(self, prevout=COutPoint(), scriptSig=script.CScript(), nSequence=0xffffffff):
         if not (0 <= nSequence <= 0xffffffff):
             raise ValueError('CTxIn: nSequence must be an integer between 0x0 and 0xffffffff; got %x' % nSequence)
         object.__setattr__(self, 'nSequence', nSequence)
@@ -255,7 +255,7 @@ class CTxInBase(ImmutableSerializable):
     @classmethod
     def stream_deserialize(cls, f):
         prevout = COutPoint.stream_deserialize(f)
-        scriptSig = CScript(BytesSerializer.stream_deserialize(f))
+        scriptSig = script.CScript(BytesSerializer.stream_deserialize(f))
         nSequence = struct.unpack(b"<I", ser_read(f, 4))[0]
         return cls(prevout, scriptSig, nSequence)
 
@@ -290,7 +290,7 @@ class CBitcoinMutableTxIn(CBitcoinTxIn):
     """A mutable CTxIn"""
     __slots__ = []
 
-    def __init__(self, prevout=None, scriptSig=CScript(), nSequence=0xffffffff):
+    def __init__(self, prevout=None, scriptSig=script.CScript(), nSequence=0xffffffff):
         if prevout is None:
             prevout = CMutableOutPoint()
         super(CBitcoinTxIn, self).__init__(prevout, scriptSig, nSequence)
@@ -314,14 +314,14 @@ class CBitcoinTxOut(CTxOutBase):
     """
     __slots__ = ['nValue', 'scriptPubKey']
 
-    def __init__(self, nValue=-1, scriptPubKey=CScript()):
+    def __init__(self, nValue=-1, scriptPubKey=script.CScript()):
         object.__setattr__(self, 'nValue', int(nValue))
         object.__setattr__(self, 'scriptPubKey', scriptPubKey)
 
     @classmethod
     def stream_deserialize(cls, f):
         nValue = struct.unpack(b"<q", ser_read(f, 8))[0]
-        scriptPubKey = CScript(BytesSerializer.stream_deserialize(f))
+        scriptPubKey = script.CScript(BytesSerializer.stream_deserialize(f))
         return cls(nValue, scriptPubKey)
 
     def stream_serialize(self, f):
@@ -369,7 +369,7 @@ class CBitcoinTxInWitness(CTxInWitnessBase):
     """Witness data for a single transaction input"""
     __slots__ = ['scriptWitness']
 
-    def __init__(self, scriptWitness=CScriptWitness()):
+    def __init__(self, scriptWitness=script.CScriptWitness()):
         object.__setattr__(self, 'scriptWitness', scriptWitness)
 
     def is_null(self):
@@ -377,7 +377,7 @@ class CBitcoinTxInWitness(CTxInWitnessBase):
 
     @classmethod
     def stream_deserialize(cls, f):
-        scriptWitness = CScriptWitness.stream_deserialize(f)
+        scriptWitness = script.CScriptWitness.stream_deserialize(f)
         return cls(scriptWitness)
 
     def stream_serialize(self, f):
@@ -638,17 +638,19 @@ class _ParamsTag():
     pass
 
 
-class CoreChainParams(object, metaclass=ABCMeta):
+class CoreChainParams(object):
     """Define consensus-critical parameters of a given instance of the Bitcoin system"""
     MAX_MONEY = None
     NAME = None
     TRANSACTION_CLASS = None
+    SCRIPT_CLASS = None
 
 
 class CoreMainParams(CoreChainParams, _ParamsTag):
     MAX_MONEY = 21000000 * COIN
     NAME = 'mainnet'
     TRANSACTION_CLASS = CBitcoinTransaction
+    SCRIPT_CLASS = script.CBitcoinScript
 
 
 class CoreTestNetParams(CoreMainParams, _ParamsTag):
@@ -673,25 +675,16 @@ def _SelectAlternativeCoreParams(alt_core_params):
 
     coreparams = alt_core_params()
 
-    _SetTransactionClassParams()
+    _SetTransactionClassParams(coreparams.TRANSACTION_CLASS)
+    script._SetScriptClassParams(coreparams.SCRIPT_CLASS)
 
 
-def _SelectCoreParams(name):
-    """Select the core chain parameters to use
-
-    Don't use this directly, use bitcointx.SelectParams() instead so both
-    consensus-critical and general parameters are set properly.
-    """
-    global coreparams
-
+def _CoreParamsByName(name):
     for cls in _ParamsTag.__subclasses__():
         if name == cls.NAME:
-            coreparams = cls()
-            break
-    else:
-        raise ValueError('Unknown chain %r' % name)
+            return cls
 
-    _SetTransactionClassParams()
+    raise ValueError('Unknown chain %r' % name)
 
 
 class CheckTransactionError(ValidationError):
@@ -808,9 +801,9 @@ class CMutableTxOut(metaclass=_TransactionClassParamsMeta):
     pass
 
 
-def _SetTransactionClassParams():
-    imm_class = coreparams.TRANSACTION_CLASS
-    mut_class = coreparams.TRANSACTION_CLASS._inverted_mutability_class
+def _SetTransactionClassParams(transaction_class):
+    imm_class = transaction_class
+    mut_class = transaction_class._inverted_mutability_class
     mut_class._inverted_mutability_class = imm_class
 
     _transaction_class_params[CTransaction] = imm_class
@@ -825,7 +818,7 @@ def _SetTransactionClassParams():
     _transaction_class_params[CMutableTxOut] = mut_class._txout_class
 
 
-_SetTransactionClassParams()
+_SetTransactionClassParams(CBitcoinTransaction)
 
 __all__ = (
     'Hash',
@@ -861,5 +854,5 @@ __all__ = (
     'Uint256',
     'bytes_for_repr',
     'str_money_value_for_repr',
-    'ReprOrStrMixin',
+    '_CoreParamsByName',
 )

@@ -92,21 +92,16 @@ def SelectParams(name):
 
     Default chain is 'mainnet'
     """
-    global params
-
     if name.startswith('sidechain/'):
         params_pair = bitcointx.sidechain.GetChainParams(name)
         assert len(params_pair) == 2
         return SelectAlternativeParams(*params_pair)
 
-    bitcointx.core._SelectCoreParams(name)
+    coreparams = bitcointx.core._CoreParamsByName(name)
 
     for cls in _ParamsTag.__subclasses__():
         if name == cls.NAME:
-            params = cls()
-            break
-    else:
-        raise ValueError('Unknown chain %r' % name)
+            SelectAlternativeParams(coreparams, cls)
+            return
 
-    if 'bitcointx.wallet' in sys.modules:
-        bitcointx.wallet._SetBase58Prefixes()
+    raise ValueError('Unknown chain %r' % name)
