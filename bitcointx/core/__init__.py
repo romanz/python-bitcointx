@@ -31,16 +31,15 @@ MAX_BLOCK_WEIGHT = 4000000
 MAX_BLOCK_SIGOPS = MAX_BLOCK_SIZE/50
 WITNESS_COINBASE_SCRIPTPUBKEY_MAGIC = bytes([script.OP_RETURN, 0x24, 0xaa, 0x21, 0xa9, 0xed])
 BIP32_HARDENED_KEY_LIMIT = 0x80000000
+WITNESS_SCALE_FACTOR = 4
 
 
 _transaction_class_params = {}  # to be filled by _SetTransactionClassParams()
 
 
 def MoneyRange(nValue, params=None):
-    global coreparams
     if not params:
         params = coreparams
-
     return 0 <= nValue <= params.MAX_MONEY
 
 
@@ -696,7 +695,6 @@ def CheckTransaction(tx):
 
     Raises CheckTransactionError
     """
-    global coreparams
 
     if not tx.vin:
         raise CheckTransactionError("CheckTransaction() : vin empty")
@@ -705,7 +703,7 @@ def CheckTransaction(tx):
 
     # Size limits
     base_tx = tx.to_immutable()
-    if len(base_tx.serialize()) > MAX_BLOCK_SIZE:
+    if len(base_tx.serialize({'include_witness': False})) * WITNESS_SCALE_FACTOR > MAX_BLOCK_WEIGHT:
         raise CheckTransactionError("CheckTransaction() : size limits failed")
 
     # Check for negative or overflow output values
