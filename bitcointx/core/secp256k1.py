@@ -120,6 +120,9 @@ secp256k1.secp256k1_ec_pubkey_serialize.argtypes = [ctypes.c_void_p, ctypes.c_ch
 secp256k1.secp256k1_ec_pubkey_create.restype = ctypes.c_int
 secp256k1.secp256k1_ec_pubkey_create.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
 
+secp256k1.secp256k1_ec_seckey_verify.restype = ctypes.c_int
+secp256k1.secp256k1_ec_seckey_verify.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+
 secp256k1.secp256k1_ecdsa_signature_parse_der.restype = ctypes.c_int
 secp256k1.secp256k1_ecdsa_signature_parse_der.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t]
 

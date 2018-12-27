@@ -103,15 +103,19 @@ class CKeyMixin():
     def __init__(self, s, compressed=True):
         raw_pubkey = ctypes.create_string_buffer(64)
 
-        # no need for explicit secp256k1_ec_seckey_verify()
-        # because secp256k1_ec_pubkey_create() will do
-        # the same checks and ensure that secret data is valid
+        result = secp256k1.secp256k1_ec_seckey_verify(
+            secp256k1_context_sign, self.secret_bytes)
+
+        if result != 1:
+            assert result == 0
+            raise ValueError('Invalid private key data')
+
         result = secp256k1.secp256k1_ec_pubkey_create(
             secp256k1_context_sign, raw_pubkey, self.secret_bytes)
 
         if result != 1:
             assert result == 0
-            raise ValueError('Invalid private key data')
+            raise ValueError('Cannot construct public key from private key')
 
         self.pub = CPubKey._from_raw(raw_pubkey, compressed=compressed)
 
