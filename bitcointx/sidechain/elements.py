@@ -706,7 +706,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
               auxiliary_generators=(), _rand_func=os.urandom):
 
         # based on Elements Core's BlindTransaction() function from src/blind.cpp
-        # FIXME: add commit hash for reference
+        # as of commit 43f6cdbd3147d9af450b73c8b8b8936e3e4166df
 
         assert len(self.vout) >= len(output_pubkeys)
         assert all(isinstance(p, CPubKey) for p in output_pubkeys)
