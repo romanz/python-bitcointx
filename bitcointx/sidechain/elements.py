@@ -135,16 +135,9 @@ class CConfidentialCommitmentBase(ImmutableSerializable):
         return "{}({})".format(self.__class__.__name__, v)
 
 
-class CAsset():
-    __slots__ = ['id']
-
-    def __init__(self, id=Uint256()):
-        if not isinstance(id, Uint256):
-            id = Uint256(id)
-        object.__setattr__(self, 'id', id)
-
+class CAsset(Uint256):
     def __repr__(self):
-        return "CAsset({})".format(self.id)
+        return "CAsset({})".format(self.to_hex())
 
 
 class CConfidentialAsset(CConfidentialCommitmentBase):
@@ -765,7 +758,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
 
         for i in range(len(self.vin)):
             # For each input we either need the asset/blinds or the generator
-            if input_assets[i].id.is_null():
+            if input_assets[i].is_null():
                 # If non-empty generator exists, parse
                 if auxiliary_generators:
                     # Parse generator here
@@ -781,7 +774,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                 asset_generator = ctypes.create_string_buffer(SECP256K1_GENERATOR_SIZE)
                 ret = secp256k1.secp256k1_generator_generate_blinded(
                     secp256k1_blind_context, asset_generator,
-                    input_assets[i].id.data, input_asset_blinding_factors[i].data)
+                    input_assets[i].data, input_asset_blinding_factors[i].data)
                 assert ret == 1
 
             targetAssetGenerators[totalTargets] = asset_generator
@@ -823,7 +816,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     targetAssetGenerators[totalTargets] = ctypes.create_string_buffer(SECP256K1_GENERATOR_SIZE)
                     ret = secp256k1.secp256k1_generator_generate(
                         secp256k1_blind_context,
-                        targetAssetGenerators[totalTargets], token.id.data)
+                        targetAssetGenerators[totalTargets], token.data)
                     assert ret == 1
                     # Issuance asset cannot be blinded by definition
                     targetAssetBlinders.append(Uint256())
@@ -1193,7 +1186,7 @@ def blind_asset(asset, assetblind):
 
     gen = ctypes.create_string_buffer(SECP256K1_GENERATOR_SIZE)
     ret = secp256k1.secp256k1_generator_generate_blinded(
-        secp256k1_blind_context, gen, asset.id.data, assetblind.data)
+        secp256k1_blind_context, gen, asset.data, assetblind.data)
     assert ret == 1
     result_commitment = ctypes.create_string_buffer(CConfidentialAsset._committedSize)
     ret = secp256k1.secp256k1_generator_serialize(
@@ -1250,7 +1243,7 @@ def generate_rangeproof(in_blinds, nonce, amount, scriptPubKey, commit, gen, ass
     rangeproof = ctypes.create_string_buffer(nRangeProofLen.value)
 
     # Compose sidechannel message to convey asset info (ID and asset blinds)
-    assetsMessage = asset.id.data + assetblind.data
+    assetsMessage = asset.data + assetblind.data
 
     ct_exponent = min(max(CoreElementsSidechainParams.ct_exponent, -1), 18)
     ct_bits = min(max(CoreElementsSidechainParams.ct_bits, 1), 51)
@@ -1293,11 +1286,11 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
     input_index = ctypes.c_size_t()
     proof_size = ctypes.c_int.in_dll(secp256k1, 'SECP256K1_SURJECTIONPROOF_RAW_SIZE').value
     proof = ctypes.create_string_buffer(proof_size)
-    tag = asset.id.data
+    tag = asset.data
 
     ret = secp256k1.secp256k1_surjectionproof_initialize(
         secp256k1_blind_context, proof, ctypes.byref(input_index),
-        build_aligned_data_array([st.id.data for st in surjectionTargets], 32),
+        build_aligned_data_array([st.data for st in surjectionTargets], 32),
         len(surjectionTargets),
         nInputsToSelect, tag, 100, randseed)
 
@@ -1383,7 +1376,7 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
             return None
     elif confAsset.is_explicit():
         res = secp256k1.secp256k1_generator_generate(
-            secp256k1_blind_context, observed_gen, confAsset.to_asset().id.data)
+            secp256k1_blind_context, observed_gen, confAsset.to_asset().data)
         if res != 1:
             assert res == 0
             return None

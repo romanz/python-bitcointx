@@ -142,7 +142,7 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
             self.assertEqual(tx_decoded['version'], tx.nVersion)
             self.assertEqual(tx_decoded['locktime'], tx.nLockTime)
             # we ignore withash field - we do not have ComputeWitnessHash() function
-            # as it only relevant for blocks, not transactions
+            # as it is only relevant for blocks, not transactions
             self.assertEqual(tx_decoded['hash'], b2lx(tx.GetHash()))
             self.assertEqual(tx_decoded['txid'], b2lx(tx.GetTxid()))
             for n, vout in enumerate(tx_decoded['vout']):
@@ -153,7 +153,7 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                     self.assertEqual(x(vout['assetcommitment']),
                                      tx.vout[n].nAsset.commitment)
                 if 'asset' in vout:
-                    self.assertEqual(vout['asset'], tx.vout[n].nAsset.to_asset().id.to_hex())
+                    self.assertEqual(vout['asset'], tx.vout[n].nAsset.to_asset().to_hex())
                 if 'scriptPubKey' in vout:
                     spk = vout['scriptPubKey']
                     self.assertEqual(x(spk['hex']), tx.vout[n].scriptPubKey)
@@ -247,8 +247,8 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                             asset = calculate_asset(entropy)
                             reiss_token = calculate_reissuance_token(
                                 entropy, tx.vin[n].assetIssuance.nAmount.is_commitment())
-                            self.assertEqual(iss['token'], reiss_token.id.to_hex())
-                        self.assertEqual(iss['asset'], asset.id.to_hex())
+                            self.assertEqual(iss['token'], reiss_token.to_hex())
+                        self.assertEqual(iss['asset'], asset.to_hex())
                     if 'assetamount' in iss:
                         self.assertEqual(int(round(iss['assetamount']*COIN)),
                                          tx.vin[n].assetIssuance.nAmount.to_amount())
