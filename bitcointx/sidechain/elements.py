@@ -148,7 +148,7 @@ class CConfidentialAsset(CConfidentialCommitmentBase):
     def __init__(self, asset_or_commitment=b''):
         assert(isinstance(asset_or_commitment, (CAsset, bytes)))
         if isinstance(asset_or_commitment, CAsset):
-            commitment = bytes([1]) + asset_or_commitment
+            commitment = bytes([1]) + asset_or_commitment.data
         else:
             commitment = asset_or_commitment
         super(CConfidentialAsset, self).__init__(commitment)
@@ -384,9 +384,13 @@ class CElementsSidechainTxWitness(CTxWitnessBase, ReprOrStrMixin):
 
     @classmethod
     def from_witness(cls, witness):
-        if not cls._immutable_restriction_lifted:
+        if not witness.__class__._immutable_restriction_lifted:
             return witness
-        return cls(witness.vtxinwit, witness.vtxoutwit)
+        vtxinwit = (cls._txin_witness_class.from_txin_witness(txinwit)
+                    for txinwit in witness.vtxinwit)
+        vtxoutwit = (cls._txout_witness_class.from_txout_witness(txoutwit)
+                     for txoutwit in witness.vtxoutwit)
+        return cls(vtxinwit, vtxoutwit)
 
     def _repr_or_str(self, strfn):
         return "C%sTxWitness([%s], [%s])" % (
@@ -408,7 +412,11 @@ class CElementsSidechainMutableTxWitness(CElementsSidechainTxWitness):
 
     @classmethod
     def from_witness(cls, witness):
-        return cls(witness.vtxinwit, witness.vtxoutwit)
+        vtxinwit = (cls._txin_witness_class.from_txin_witness(txinwit)
+                    for txinwit in witness.vtxinwit)
+        vtxoutwit = (cls._txout_witness_class.from_txout_witness(txoutwit)
+                     for txoutwit in witness.vtxoutwit)
+        return cls(vtxinwit, vtxoutwit)
 
 
 class CAssetIssuance(ImmutableSerializable, ReprOrStrMixin):
@@ -525,10 +533,10 @@ class CElementsSidechainTxIn(CTxInBase, ReprOrStrMixin):
             return txin
         else:
             return cls(COutPoint.from_outpoint(txin.prevout), txin.scriptSig, txin.nSequence,
-                       txin.assetIssuance)
+                       txin.assetIssuance, txin.is_pegin)
 
     def _repr_or_str(self, strfn):
-        return "C%sTxIn(%s, %s, 0x%x, %s, %r)" % (
+        return "C%sTxIn(%s, %s, 0x%x, %s, is_pegin=%r)" % (
             'Mutable' if self._immutable_restriction_lifted else '',
             strfn(self.prevout), repr(self.scriptSig),
             self.nSequence, strfn(self.assetIssuance),
@@ -551,7 +559,7 @@ class CElementsSidechainMutableTxIn(CElementsSidechainTxIn):
     def from_txin(cls, txin):
         """Create a fully mutable copy of an existing Elements sidechain TxIn"""
         prevout = CMutableOutPoint.from_outpoint(txin.prevout)
-        return cls(prevout, txin.scriptSig, txin.nSequence, txin.assetIssuance)
+        return cls(prevout, txin.scriptSig, txin.nSequence, txin.assetIssuance, txin.is_pegin)
 
 
 class CElementsSidechainTxOut(CTxOutBase, ReprOrStrMixin):
@@ -595,9 +603,10 @@ class CElementsSidechainTxOut(CTxOutBase, ReprOrStrMixin):
                 and self.nAsset.is_explicit())
 
     def _repr_or_str(self, strfn):
-        return "C{}TxOut({}, {}, {})".format(
+        return "C{}TxOut({}, {}, {}, {})".format(
             'Mutable' if self._immutable_restriction_lifted else '',
-            strfn(self.nValue), repr(self.scriptPubKey), strfn(self.nAsset))
+            strfn(self.nValue), repr(self.scriptPubKey), strfn(self.nAsset),
+            strfn(self.nNonce))
 
     @classmethod
     def from_txout(cls, txout):
@@ -661,7 +670,8 @@ class CElementsSidechainTransactionCommon():
     def stream_serialize(self, f, include_witness=True):
         f.write(struct.pack(b"<i", self.nVersion))
         if include_witness and not self.wit.is_null():
-            assert(len(self.wit.vtxinwit) == len(self.vin))
+            assert(len(self.wit.vtxinwit) == 0 or len(self.wit.vtxinwit) == len(self.vin))
+            assert(len(self.wit.vtxoutwit) == 0 or len(self.wit.vtxoutwit) == len(self.vout))
             f.write(b'\x01')  # Flag
             VectorSerializer.stream_serialize(self._txin_class, self.vin, f)
             VectorSerializer.stream_serialize(self._txout_class, self.vout, f)
@@ -695,18 +705,20 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
 
     def blind(self, input_blinding_factors=(), input_asset_blinding_factors=(),
               input_assets=(), input_amounts=(),
-              output_pubkeys=(), blind_issuance_assets=(), blind_issuance_tokens=(),
+              output_pubkeys=(), blind_issuance_asset_keys=(), blind_issuance_token_keys=(),
               auxiliary_generators=(), _rand_func=os.urandom):
+
+        assert(self._immutable_restriction_lifted), "can blind only mutable transaction"
 
         # based on Elements Core's BlindTransaction() function from src/blind.cpp
         # as of commit 43f6cdbd3147d9af450b73c8b8b8936e3e4166df
 
         assert len(self.vout) >= len(output_pubkeys)
         assert all(isinstance(p, CPubKey) for p in output_pubkeys)
-        assert len(self.vin) + self.num_issuances >= len(blind_issuance_assets)
-        assert all(isinstance(k, CKey) for k in blind_issuance_assets)
-        assert len(self.vin) + self.num_issuances >= len(blind_issuance_tokens)
-        assert all(isinstance(k, CKey) for k in blind_issuance_tokens)
+        assert len(self.vin) + self.num_issuances >= len(blind_issuance_asset_keys)
+        assert all(k is None or isinstance(k, CKey) for k in blind_issuance_asset_keys)
+        assert len(self.vin) + self.num_issuances >= len(blind_issuance_token_keys)
+        assert all(k is None or isinstance(k, CKey) for k in blind_issuance_token_keys)
         assert len(self.vin) == len(input_blinding_factors)
         assert all(isinstance(bf, Uint256) for bf in input_blinding_factors)
         assert len(self.vin) == len(input_asset_blinding_factors)
@@ -791,20 +803,20 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
 
                 # New Issuance
                 if issuance.assetBlindingNonce.is_null():
-                    blind_issuance = (len(blind_issuance_tokens) > i
-                                      and blind_issuance_tokens[i].is_Valid())
+                    blind_issuance = (len(blind_issuance_token_keys) > i
+                                      and blind_issuance_token_keys[i] is not None)
                     entropy = generate_asset_entropy(self.vin[i].prevout, issuance.assetEntropy)
                     asset = calculate_asset(entropy)
                     token = calculate_reissuance_token(entropy, blind_issuance)
                 else:
-                    asset = calculate_asset(asset, issuance.assetEntropy)
+                    asset = calculate_asset(issuance.assetEntropy)
 
                 if not issuance.nAmount.is_null():
                     surjectionTargets[totalTargets] = asset
                     targetAssetGenerators[totalTargets] = ctypes.create_string_buffer(SECP256K1_GENERATOR_SIZE)
                     ret = secp256k1.secp256k1_generator_generate(
                         secp256k1_blind_context,
-                        targetAssetGenerators[totalTargets], asset)
+                        targetAssetGenerators[totalTargets], asset.data)
                     assert ret == 1
                     # Issuance asset cannot be blinded by definition
                     targetAssetBlinders.append(Uint256())
@@ -850,9 +862,6 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
         # Number of outputs and issuances to blind
         nToBlind = 0
 
-        txinwitsize = len(self.wit.vtxinwit)
-        txoutwitsize = len(self.wit.vtxoutwit)
-
         blinds = []
         assetblinds = []
         amounts_to_blind = []
@@ -873,20 +882,20 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
             issuance = self.vin[nIn].assetIssuance
             if not issuance.is_null():
                 # Marked for blinding
-                if len(blind_issuance_assets) > nIn and blind_issuance_assets[nIn].is_valid():
+                if len(blind_issuance_asset_keys) > nIn and blind_issuance_asset_keys[nIn] is not None:
                     if (
                         issuance.nAmount.is_explicit() and
-                        (txinwitsize <= nIn
+                        (len(self.wit.vtxinwit) <= nIn
                          or len(self.wit.vtxinwit[nIn].issuanceAmountRangeproof) == 0)
                     ):
                         nToBlind += 1
                     else:
                         return None
 
-                if len(blind_issuance_tokens) > nIn and blind_issuance_tokens[nIn].is_valid():
+                if len(blind_issuance_token_keys) > nIn and blind_issuance_token_keys[nIn] is not None:
                     if (
                         issuance.nInflationKeys.is_explicit() and
-                        (txinwitsize <= nIn
+                        (len(self.wit.vtxinwit) <= nIn
                          or len(self.wit.vtxinwit[nIn].inflationKeysRangeproof) == 0)
                     ):
                         nToBlind += 1
@@ -900,7 +909,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     not out_pub.is_fullyvalid
                     or not self.vout[nOut].nValue.is_explicit()
                     or not self.vout[nOut].nAsset.is_explicit()
-                    or (txoutwitsize > nOut and not self.wit.vtxoutwit[nOut].is_null())
+                    or (len(self.wit.vtxoutwit) > nOut and not self.wit.vtxoutwit[nOut].is_null())
                     or self.vout[nOut].is_fee()
                 ):
                     return None
@@ -909,8 +918,10 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
 
         # First blind issuance pseudo-inputs
         for nIn, txin in enumerate(self.vin):
-            asset_issuace_valid = len(blind_issuance_assets) > nIn and blind_issuance_assets[nIn].is_valid()
-            token_issuance_valid = len(blind_issuance_tokens) > nIn and blind_issuance_tokens[nIn].is_valid()
+            asset_issuace_valid = (len(blind_issuance_asset_keys) > nIn
+                                   and blind_issuance_asset_keys[nIn] is not None)
+            token_issuance_valid = (len(blind_issuance_token_keys) > nIn and
+                                    blind_issuance_token_keys[nIn] is not None)
             for nPseudo in range(2):
                 if nPseudo == 0:
                     iss_valid = asset_issuace_valid
@@ -958,7 +969,8 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                         # though it is possible. No privacy gained here, incompatible with secp api
                         return result_tuple(nSuccessfullyBlinded)
 
-                    assert len(self.wit.vtxinwit) == len(self.vin)
+                    while len(self.wit.vtxinwit) <= nIn:
+                        self.wit.vtxinwit.append(CElementsSidechainMutableTxInWitness())
 
                     txinwit = self.wit.vtxinwit[nIn]
 
@@ -971,15 +983,25 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     (confValue, commit) = create_value_commitment(blinds[-1].data, gen, amount)
 
                     if nPseudo:
-                        issuance.nInflationKeys = confValue
+                        issuance = CAssetIssuance(
+                            assetBlindingNonce=issuance.assetBlindingNonce,
+                            assetEntropy=issuance.assetEntropy,
+                            nAmount=issuance.nAmount,
+                            nInflationKeys=confValue)
                     else:
-                        issuance.nAmount = confValue
+                        issuance = CAssetIssuance(
+                            assetBlindingNonce=issuance.assetBlindingNonce,
+                            assetEntropy=issuance.assetEntropy,
+                            nAmount=confValue,
+                            nInflationKeys=issuance.nInflationKeys)
+
+                    self.vin[nIn].assetIssuance = issuance
 
                     # nonce should just be blinding key
                     if nPseudo == 0:
-                        nonce = Uint256(blind_issuance_assets[nIn].secret_bytes)
+                        nonce = Uint256(blind_issuance_asset_keys[nIn].secret_bytes)
                     else:
-                        nonce = Uint256(blind_issuance_tokens[nIn].secret_bytes)
+                        nonce = Uint256(blind_issuance_token_keys[nIn].secret_bytes)
 
                     # Generate rangeproof, no script committed for issuances
                     rangeproof = generate_rangeproof(
@@ -1073,7 +1095,8 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                         nSuccessfullyBlinded += 1
                         return result_tuple(nSuccessfullyBlinded)
 
-                assert len(self.wit.vtxoutwit) == len(self.vout)
+                while len(self.wit.vtxoutwit) <= nOut:
+                    self.wit.vtxoutwit.append(CElementsSidechainMutableTxOutWitness())
 
                 txoutwit = self.wit.vtxoutwit[nOut]
 
@@ -1101,7 +1124,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
 
                 # Create surjection proof for this output
                 if not surject_output(txoutwit, surjectionTargets, targetAssetGenerators,
-                                      targetAssetBlinders, assetblindptrs, gen, asset,
+                                      targetAssetBlinders, assetblinds, gen, asset,
                                       _rand_func=_rand_func):
                     continue
 
@@ -1119,6 +1142,9 @@ class CElementsSidechainTransaction(CElementsSidechainTransactionCommon, CImmuta
 
 
 class CElementsSidechainScript(CScriptBase):
+
+    def derive_blinding_key(self, blinding_derivation_key):
+        return derive_blinding_key(blinding_derivation_key, self)
 
     def is_unspendable(self):
         if len(self) == 0:
@@ -1280,31 +1306,33 @@ def generate_output_rangeproof_nonce(output_pubkey, _rand_func=os.urandom):
 def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAssetBlinders,
                    assetblinds, gen, asset, _rand_func=os.urandom):
 
+    # Note: the code only uses the single last elements of assetblinds.
+    # We could require these elements to be passed explicitly,
+    # but we will try to be close to original code.
+
     nInputsToSelect = min(3, len(surjectionTargets))
     randseed = _rand_func(32)
 
     input_index = ctypes.c_size_t()
     proof_size = ctypes.c_int.in_dll(secp256k1, 'SECP256K1_SURJECTIONPROOF_RAW_SIZE').value
     proof = ctypes.create_string_buffer(proof_size)
-    tag = asset.data
 
     ret = secp256k1.secp256k1_surjectionproof_initialize(
         secp256k1_blind_context, proof, ctypes.byref(input_index),
         build_aligned_data_array([st.data for st in surjectionTargets], 32),
         len(surjectionTargets),
-        nInputsToSelect, tag, 100, randseed)
+        nInputsToSelect, asset.data, 100, randseed)
 
     if ret == 0:
+        # probably asset did not match any surjectionTargets
         return False
-    else:
-        assert ret == 1
 
     ephemeral_input_tags_buf = build_aligned_data_array(targetAssetGenerators, 64)
 
     ret = secp256k1.secp256k1_surjectionproof_generate(
         secp256k1_blind_context, proof,
         ephemeral_input_tags_buf, len(targetAssetGenerators),
-        gen, input_index, targetAssetBlinders[input_index.value].data, assetblinds[-1])
+        gen, input_index, targetAssetBlinders[input_index.value].data, assetblinds[-1].data)
 
     assert ret == 1
 
@@ -1332,7 +1360,7 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
     assert isinstance(confValue, CConfidentialValue)
     assert isinstance(confAsset, CConfidentialAsset)
     assert isinstance(nNonce, CConfidentialNonce)
-    assert isinstance(committedScript, CScript)
+    assert isinstance(committedScript, CElementsSidechainScript)
     assert isinstance(rangeproof, bytes)
 
     # NOTE: we do not allow creation of invalid CKey instances,
@@ -1343,12 +1371,9 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
 
     ephemeral_key = CPubKey(nNonce.commitment)
 
-    if len(nNonce.commitment) > 0 and not ephemeral_key.is_fullyvalid():
-        return None
-
     # ECDH or not depending on if nonce commitment is non-empty
     if len(nNonce.commitment) > 0:
-        if not ephemeral_key.is_fullyvalid():
+        if not ephemeral_key.is_fullyvalid:
             return None
         nonce = hashlib.sha256(key.ECDH(ephemeral_key)).digest()
     else:
@@ -1390,7 +1415,6 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
         return None
 
     blinding_factor_out = ctypes.create_string_buffer(32)
-    asset_out = ctypes.create_string_buffer(32)
 
     min_value = ctypes.c_uint64()
     max_value = ctypes.c_uint64()
@@ -1439,17 +1463,17 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
         secp256k1_blind_context, derived_generator, recalculated_gen)
     assert res == 1
 
-    if observed_generator != derived_generator:
+    if observed_generator.raw != derived_generator.raw:
         return None
 
     return UnblindConfidentialPairResult(
-        amount=amount.value, blinding_factor=Uint256(blinding_factor_out),
-        asset=CAsset(asset_out), asset_blinding_factor=Uint256(msg[32:]))
+        amount=amount.value, blinding_factor=Uint256(blinding_factor_out.raw),
+        asset=CAsset(asset_type[:32]), asset_blinding_factor=Uint256(msg[32:64]))
 
 
 def derive_blinding_key(blinding_derivation_key, script):
     assert isinstance(blinding_derivation_key, CKeyMixin)
-    return CKey(hmac.new(blinding_derivation_key.secret_data, script,
+    return CKey(hmac.new(blinding_derivation_key.secret_bytes, script,
                          hashlib.sha256).digest())
 
 
@@ -1470,6 +1494,7 @@ __all__ = (
     'CConfidentialAsset',
     'CConfidentialValue',
     'CConfidentialNonce',
+    'derive_blinding_key',
     'generate_asset_entropy',
     'calculate_asset',
     'calculate_reissuance_token',

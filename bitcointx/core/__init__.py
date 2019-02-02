@@ -453,9 +453,11 @@ class CBitcoinTxWitness(CTxWitnessBase):
 
     @classmethod
     def from_witness(cls, witness):
-        if not cls._immutable_restriction_lifted:
+        if not witness._immutable_restriction_lifted:
             return witness
-        return cls(witness.vtxinwit)
+        vtxinwit = (cls._txin_witness_class.from_txin_witness(txinwit)
+                    for txinwit in witness.vtxinwit)
+        return cls(vtxinwit)
 
     def __repr__(self):
         return "C%sTxWitness([%s])" % (
@@ -475,7 +477,9 @@ class CBitcoinMutableTxWitness(CBitcoinTxWitness):
 
     @classmethod
     def from_witness(cls, witness):
-        return cls(witness.vtxinwit)
+        vtxinwit = (cls._txin_witness_class.from_txin_witness(txinwit)
+                    for txinwit in witness.vtxinwit)
+        return cls(vtxinwit)
 
 
 class CTransactionBase(ImmutableSerializable, ReprOrStrMixin):
@@ -545,6 +549,13 @@ class CTransactionBase(ImmutableSerializable, ReprOrStrMixin):
             return self.__class__.from_tx(self)
         return self._inverted_mutability_class.from_tx(self)
 
+    @classmethod
+    def _from_tx(cls, tx):
+        vin = [cls._txin_class.from_txin(txin) for txin in tx.vin]
+        vout = [cls._txout_class.from_txout(txout) for txout in tx.vout]
+        wit = cls._witness_class.from_witness(tx.wit)
+        return cls(vin, vout, tx.nLockTime, tx.nVersion, wit)
+
 
 class CImmutableTransactionBase(CTransactionBase):
     @classmethod
@@ -558,7 +569,7 @@ class CImmutableTransactionBase(CTransactionBase):
             # tx is immutable, therefore returning same tx is OK
             return tx
 
-        return cls(tx.vin, tx.vout, tx.nLockTime, tx.nVersion, tx.wit)
+        return cls._from_tx(tx)
 
 
 @make_mutable
@@ -585,7 +596,7 @@ class CMutableTransactionBase(CTransactionBase):
         self.nVersion = nVersion
 
         wclass = self._witness_class
-        if witness is None:
+        if witness is None or witness.is_null():
             witness = wclass([wclass._txin_witness_class() for dummy in range(len(vin))],
                              [wclass._txout_witness_class() for dummy in range(len(vout))])
         else:
@@ -596,11 +607,8 @@ class CMutableTransactionBase(CTransactionBase):
     @classmethod
     def from_tx(cls, tx):
         """Create a fully mutable copy of a pre-existing transaction"""
-
         # tx is mutable, we should always return new instance
-        vin = [CMutableTxIn.from_txin(txin) for txin in tx.vin]
-        vout = [CMutableTxOut.from_txout(txout) for txout in tx.vout]
-        return cls(vin, vout, tx.nLockTime, tx.nVersion, tx.wit)
+        return cls._from_tx(tx)
 
 
 class CBitcoinTransactionCommon():
