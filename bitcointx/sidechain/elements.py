@@ -24,6 +24,8 @@ import ctypes
 import hashlib
 from collections import namedtuple
 
+from io import BytesIO
+
 from bitcointx.core.secp256k1 import (
     secp256k1, secp256k1_has_zkp,
     secp256k1_blind_context,
@@ -32,19 +34,29 @@ from bitcointx.core.secp256k1 import (
 )
 
 from bitcointx.core import (
-    CoreMainParams, Uint256, MoneyRange,
+    CoreMainParams, Uint256, MoneyRange, Hash,
     bytes_for_repr, ReprOrStrMixin, b2x,
     CTxWitnessBase, CTxInWitnessBase, CTxOutWitnessBase,
     CTxInBase, CTxOutBase, COutPoint, CMutableOutPoint,
     CImmutableTransactionBase, CMutableTransactionBase
 )
 from bitcointx.core.key import CKey, CKeyMixin, CPubKey
-from bitcointx.core.script import CScript, CScriptBase, CScriptWitness
+from bitcointx.core.script import (
+    CScript, CScriptBase, CScriptWitness,
+    SIGVERSION_BASE, SIGVERSION_WITNESS_V0,
+    RawBitcoinSignatureHash,
+    SIGHASH_NONE,
+    SIGHASH_SINGLE,
+    SIGHASH_ANYONECANPAY
+)
 from bitcointx.core.sha256 import CSHA256
 from bitcointx.core.serialize import (
     ImmutableSerializable, SerializationError,
     BytesSerializer, VectorSerializer,
     ser_read, make_mutable
+)
+from bitcointx.wallet import (
+    CBase58BitcoinAddress, CBitcoinAddressError
 )
 
 # If this flag is set, the CTxIn including this COutPoint has a CAssetIssuance object.
@@ -63,6 +75,61 @@ class WitnessSerializationError(SerializationError):
 
 class TxInSerializationError(SerializationError):
     pass
+
+
+class ConfidentialAddress(CBase58BitcoinAddress):
+
+    @classmethod
+    def _base58_submatch(cls, data, prefix):
+        for subclass in cls.__subclasses__():
+            assert len(subclass.base58_prefix) == 2
+            assert prefix == subclass.base58_prefix[:1]
+            if data[0] == subclass.base58_prefix[1]:
+                return subclass, data[1:], subclass.base58_prefix
+        raise CBitcoinAddressError('Sub-version %d not a recognized Confidential Address' % data[0])
+
+    @classmethod
+    def from_unconfidential(cls, unconfidential_adr, blinding_pubkey):
+        """Convert unconfidential address to confidential
+
+        Raises CBitcoinAddressError if blinding_pubkey is invalid
+
+        unconfidential_adr can be string or CBase58BitcoinAddress instance
+        blinding_pubkey must be a bytes instance
+        """
+        if not isinstance(blinding_pubkey, bytes):
+            raise TypeError('blinding_pubkey must be bytes instance; got %r' % blinding_pubkey.__class__)
+        if not isinstance(blinding_pubkey, CPubKey):
+            blinding_pubkey = CPubKey(blinding_pubkey)
+        if not blinding_pubkey.is_fullyvalid:
+            raise CBitcoinAddressError('invalid blinding pubkey')
+
+        if not isinstance(unconfidential_adr, CBase58BitcoinAddress):
+            unconfidential_adr = CBase58BitcoinAddress(unconfidential_adr)
+
+        if len(cls.base58_prefix) > 1 and unconfidential_adr.prefix != cls.base58_prefix[1:]:
+            raise CBitcoinAddressError('cannot create {} from {}: inner prefix mismatch'
+                                       .format(cls, unconfidential_adr.__class__.__name__))
+
+        return CBase58BitcoinAddress.from_bytes(
+            unconfidential_adr.base58_prefix + blinding_pubkey + unconfidential_adr,
+            cls.base58_prefix[0:1])
+
+    def to_unconfidential(self):
+        return CBase58BitcoinAddress.from_bytes(self[33:], self.base58_prefix[1:2])
+
+    @property
+    def blinding_pubkey(self):
+        return CPubKey(self[0:33])
+
+
+class P2PKHConfidentialAddress(ConfidentialAddress):
+    pass
+
+
+class P2SHConfidentialAddress(ConfidentialAddress):
+    pass
+
 
 
 class CConfidentialCommitmentBase(ImmutableSerializable):
@@ -137,7 +204,7 @@ class CConfidentialCommitmentBase(ImmutableSerializable):
 
 class CAsset(Uint256):
     def __repr__(self):
-        return "CAsset({})".format(self.to_hex())
+        return "CAsset('{}')".format(self.to_hex())
 
 
 class CConfidentialAsset(CConfidentialCommitmentBase):
@@ -499,7 +566,7 @@ class CElementsSidechainTxIn(CTxInBase, ReprOrStrMixin):
 
         return cls(prevout, base.scriptSig, base.nSequence, assetIssuance, is_pegin)
 
-    def stream_serialize(self, f):
+    def stream_serialize(self, f, for_sighash=False):
         if self.prevout.n == 0xffffffff:
             has_asset_issuance = False
             outpoint = self.prevout
@@ -509,10 +576,11 @@ class CElementsSidechainTxIn(CTxInBase, ReprOrStrMixin):
 
             has_asset_issuance = not self.assetIssuance.is_null()
             n = self.prevout.n & OUTPOINT_INDEX_MASK
-            if has_asset_issuance:
-                n |= OUTPOINT_ISSUANCE_FLAG
-            if self.is_pegin:
-                n |= OUTPOINT_PEGIN_FLAG
+            if not for_sighash:
+                if has_asset_issuance:
+                    n |= OUTPOINT_ISSUANCE_FLAG
+                if self.is_pegin:
+                    n |= OUTPOINT_PEGIN_FLAG
             outpoint = COutPoint(self.prevout.hash, n)
 
         COutPoint.stream_serialize(outpoint, f)
@@ -667,20 +735,23 @@ class CElementsSidechainTransactionCommon():
             nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
             return cls(vin, vout, nLockTime, nVersion)
 
-    def stream_serialize(self, f, include_witness=True):
+    def stream_serialize(self, f, include_witness=True, for_sighash=False):
         f.write(struct.pack(b"<i", self.nVersion))
         if include_witness and not self.wit.is_null():
             assert(len(self.wit.vtxinwit) == 0 or len(self.wit.vtxinwit) == len(self.vin))
             assert(len(self.wit.vtxoutwit) == 0 or len(self.wit.vtxoutwit) == len(self.vout))
             f.write(b'\x01')  # Flag
+            # no check of for_sighash, because standard sighash calls this without witnesses.
             VectorSerializer.stream_serialize(self._txin_class, self.vin, f)
             VectorSerializer.stream_serialize(self._txout_class, self.vout, f)
             # Note: nLockTime goes before witness in Elements sidechain transactions
             f.write(struct.pack(b"<I", self.nLockTime))
             self.wit.stream_serialize(f)
         else:
-            f.write(b'\x00')  # Flag is needed in Elements sidechain
-            VectorSerializer.stream_serialize(self._txin_class, self.vin, f)
+            if not for_sighash:
+                f.write(b'\x00')  # Flag is needed in Elements sidechain
+            VectorSerializer.stream_serialize(self._txin_class, self.vin, f,
+                                              inner_params={'for_sighash': for_sighash})
             VectorSerializer.stream_serialize(self._txout_class, self.vout, f)
             f.write(struct.pack(b"<I", self.nLockTime))
 
@@ -739,7 +810,9 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                 if bf is None:
                     output_asset_blinding_factors[i] = Uint256()
 
-            return nSuccessfullyBlinded, (output_blinding_factors, output_asset_blinding_factors)
+            return BlindResult(num_successfully_blinded=nSuccessfullyBlinded,
+                               blinding_factors=output_blinding_factors,
+                               asset_blinding_factors=output_asset_blinding_factors)
 
         if auxiliary_generators:
             assert len(auxiliary_generators) >= len(self.vin)
@@ -789,7 +862,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     input_assets[i].data, input_asset_blinding_factors[i].data)
                 assert ret == 1
 
-            targetAssetGenerators[totalTargets] = asset_generator
+            targetAssetGenerators[totalTargets] = asset_generator.raw
             surjectionTargets[totalTargets] = input_assets[i]
             targetAssetBlinders.append(input_asset_blinding_factors[i])
             totalTargets += 1
@@ -837,15 +910,16 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
         if auxiliary_generators:
             # Process any additional targets from auxiliary_generators
             # we know nothing about it other than the generator itself
-            for ag in auxiliary_generators[len(self.vin):]:
-                targetAssetGenerators[totalTargets] = ctypes.create_string_buffer(SECP256K1_GENERATOR_SIZE)
+            for n, ag in enumerate(auxiliary_generators[len(self.vin):]):
+                gen_buf = ctypes.create_string_buffer(SECP256K1_GENERATOR_SIZE)
                 ret = secp256k1.secp256k1_generator_parse(
                     secp256k1_blind_context,
-                    targetAssetGenerators[totalTargets], auxiliary_generators[i])
+                    gen_buf, auxiliary_generators[len(self.vin)+n])
                 if ret != 1:
                     assert ret == 0
                     return None
 
+                targetAssetGenerators[totalTargets] = gen_buf.raw
                 surjectionTargets[totalTargets] = Uint256()
                 targetAssetBlinders.append(Uint256())
                 totalTargets += 1
@@ -1152,10 +1226,84 @@ class CElementsSidechainScript(CScriptBase):
         return super(CElementsSidechainScript, self).is_unspendable()
 
 
+def RawElementsSidechainSignatureHash(script, txTo, inIdx, hashtype, amount=0,
+                                      sigversion=SIGVERSION_BASE):
+    """Consensus-correct SignatureHash
+
+    Returns (hash, err) to precisely match the consensus-critical behavior of
+    the SIGHASH_SINGLE bug. (inIdx is *not* checked for validity)
+
+    If you're just writing wallet software you probably want SignatureHash()
+    instead.
+    """
+    assert sigversion in (SIGVERSION_BASE, SIGVERSION_WITNESS_V0)
+
+    if sigversion == SIGVERSION_BASE:
+        # revert to standard bitcoin signature hash
+        return RawBitcoinSignatureHash(script, txTo, inIdx, hashtype,
+                                       amount=amount, sigversion=sigversion)
+
+    hashPrevouts = b'\x00'*32
+    hashSequence = b'\x00'*32
+    hashIssuance = b'\x00'*32
+    hashOutputs  = b'\x00'*32
+
+    if not (hashtype & SIGHASH_ANYONECANPAY):
+        serialize_prevouts = bytes()
+        serialize_issuance = bytes()
+        for vin in txTo.vin:
+            serialize_prevouts += vin.prevout.serialize()
+            if vin.assetIssuance.is_null():
+                serialize_issuance += b'\x00'
+            else:
+                f = BytesIO()
+                BytesSerializer.stream_serialize(vin.assetIssuance, f)
+                serialize_issuance += f.getbuffer()
+        hashPrevouts = Hash(serialize_prevouts)
+        hashIssuance = Hash(serialize_issuance)
+
+    if (not (hashtype & SIGHASH_ANYONECANPAY) and (hashtype & 0x1f) != SIGHASH_SINGLE and (hashtype & 0x1f) != SIGHASH_NONE):
+        serialize_sequence = bytes()
+        for i in txTo.vin:
+            serialize_sequence += struct.pack("<I", i.nSequence)
+        hashSequence = Hash(serialize_sequence)
+
+    if ((hashtype & 0x1f) != SIGHASH_SINGLE and (hashtype & 0x1f) != SIGHASH_NONE):
+        serialize_outputs = bytes()
+        for o in txTo.vout:
+            serialize_outputs += o.serialize()
+        hashOutputs = Hash(serialize_outputs)
+    elif ((hashtype & 0x1f) == SIGHASH_SINGLE and inIdx < len(txTo.vout)):
+        serialize_outputs = txTo.vout[inIdx].serialize()
+        hashOutputs = Hash(serialize_outputs)
+
+    f = BytesIO()
+    f.write(struct.pack("<i", txTo.nVersion))
+    f.write(hashPrevouts)
+    f.write(hashSequence)
+    f.write(hashIssuance)
+    txTo.vin[inIdx].prevout.stream_serialize(f)
+    BytesSerializer.stream_serialize(script, f)
+    f.write(struct.pack("<q", amount))
+    f.write(struct.pack("<I", txTo.vin[inIdx].nSequence))
+    if not txTo.vin[inIdx].assetIssuance.is_null():
+        BytesSerializer.stream_serialize(txTo.vin[inIdx].assetIssuance, f)
+    f.write(hashOutputs)
+    f.write(struct.pack("<i", txTo.nLockTime))
+    f.write(struct.pack("<i", hashtype))
+
+    hash = Hash(f.getvalue())
+
+    return (hash, None)
+
+
 class CoreElementsSidechainParams(CoreMainParams):
     NAME = 'sidechain/elements'
     TRANSACTION_CLASS = CElementsSidechainTransaction
     SCRIPT_CLASS = CElementsSidechainScript
+    SUBSTITUTE_FUNCTIONS = {
+        'script': {'RawSignatureHash': RawElementsSidechainSignatureHash}
+    }
 
     ct_exponent = 0
     ct_bits = 32
@@ -1173,6 +1321,12 @@ class ElementsSidechainParams(CoreElementsSidechainParams):
                        'SECRET_KEY': 239,
                        'EXTENDED_PUBKEY': b'\x04\x35\x87\xCF',
                        'EXTENDED_PRIVKEY': b'\x04\x35\x83\x94'}
+
+    EXTRA_BASE58_ADDRESS_CLASS_MAP = {
+        ConfidentialAddress: 'CONFIDENTIAL_ADDR',
+        P2PKHConfidentialAddress: 'CONFIDENTIAL_PUBKEY_ADDR',
+        P2SHConfidentialAddress: 'CONFIDENTIAL_SCRIPT_ADDR',
+    }
 
     BECH32_HRP = None
 
@@ -1252,6 +1406,8 @@ def generate_rangeproof(in_blinds, nonce, amount, scriptPubKey, commit, gen, ass
     assert isinstance(commit, bytes)
     assert len(commit) == SECP256K1_PEDERSEN_COMMITMENT_SIZE
     assert isinstance(asset, CAsset)
+    assert isinstance(gen, bytes)
+    assert len(gen) == SECP256K1_GENERATOR_SIZE
 
     # Note: the code only uses the single last elements of blinds and
     # assetblinds. We could require these elements to be passed explicitly,
@@ -1350,7 +1506,7 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
         secp256k1_blind_context, serialized_proof, ctypes.byref(output_len), proof)
     assert output_len.value == expected_output_len
 
-    txoutwit.surjectionproof = bytes(serialized_proof)
+    txoutwit.surjectionproof = serialized_proof.raw
 
     return True
 
@@ -1480,12 +1636,13 @@ def derive_blinding_key(blinding_derivation_key, script):
 ZKPRangeproofInfo = namedtuple('ZKPRangeproofInfo', 'exp mantissa value_min value_max')
 UnblindConfidentialPairResult = namedtuple('UnblindConfidentialPairResult',
                                            'amount blinding_factor asset asset_blinding_factor')
+BlindResult = namedtuple('BlindResult',
+                         'num_successfully_blinded, blinding_factors, asset_blinding_factors')
 
 
 def get_chain_params(name):
     assert name == CoreElementsSidechainParams.NAME
     return CoreElementsSidechainParams, ElementsSidechainParams
-
 
 __all__ = (
     'get_chain_params',
@@ -1498,4 +1655,7 @@ __all__ = (
     'generate_asset_entropy',
     'calculate_asset',
     'calculate_reissuance_token',
+    'ConfidentialAddress',
+    'P2SHConfidentialAddress',
+    'P2PKHConfidentialAddress',
 )

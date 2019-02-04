@@ -645,7 +645,7 @@ class CBitcoinTransactionCommon():
             nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
             return cls(vin, vout, nLockTime, nVersion)
 
-    def stream_serialize(self, f, include_witness=True):
+    def stream_serialize(self, f, include_witness=True, for_sighash=False):
         f.write(struct.pack(b"<i", self.nVersion))
         if include_witness and not self.wit.is_null():
             assert(len(self.wit.vtxinwit) == len(self.vin))
@@ -691,6 +691,9 @@ class CoreMainParams(CoreChainParams, _ParamsTag):
     NAME = 'mainnet'
     TRANSACTION_CLASS = CBitcoinTransaction
     SCRIPT_CLASS = script.CBitcoinScript
+    SUBSTITUTE_FUNCTIONS = {
+        'script': {'RawSignatureHash': script.RawBitcoinSignatureHash}
+    }
 
 
 class CoreTestNetParams(CoreMainParams, _ParamsTag):
@@ -716,7 +719,8 @@ def _SelectAlternativeCoreParams(alt_core_params):
     coreparams = alt_core_params()
 
     _SetTransactionClassParams(coreparams.TRANSACTION_CLASS)
-    script._SetScriptClassParams(coreparams.SCRIPT_CLASS)
+    script._SetScriptClassParams(coreparams.SCRIPT_CLASS,
+                                 coreparams.SUBSTITUTE_FUNCTIONS['script'])
 
 
 def _CoreParamsByName(name):

@@ -82,7 +82,8 @@ def SelectAlternativeParams(alt_core_params, alt_main_params):
     params = alt_main_params()
 
     if 'bitcointx.wallet' in sys.modules:
-        bitcointx.wallet._SetBase58Prefixes()
+        bitcointx.wallet._SetBase58Prefixes(
+            getattr(params, 'EXTRA_BASE58_ADDRESS_CLASS_MAP', None))
 
 
 def SelectParams(name):

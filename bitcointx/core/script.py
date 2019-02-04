@@ -29,6 +29,7 @@ import bitcointx.core._bignum
 from .serialize import VarIntSerializer, BytesSerializer, ImmutableSerializable
 
 _script_class_params = {}  # to be filled by _SetScriptClassParams()
+_raw_signature_hash_func = None  # to be set by _SetScriptClassParams()
 
 MAX_SCRIPT_SIZE = 10000
 MAX_SCRIPT_ELEMENT_SIZE = 520
@@ -967,6 +968,11 @@ def CompareBigEndian(c1, c2):
 
 
 def RawSignatureHash(script, txTo, inIdx, hashtype, amount=0, sigversion=SIGVERSION_BASE):
+    return _raw_signature_hash_func(script, txTo, inIdx, hashtype,
+                                    amount=amount, sigversion=sigversion)
+
+
+def RawBitcoinSignatureHash(script, txTo, inIdx, hashtype, amount=0, sigversion=SIGVERSION_BASE):
     """Consensus-correct SignatureHash
 
     Returns (hash, err) to precisely match the consensus-critical behavior of
@@ -975,6 +981,8 @@ def RawSignatureHash(script, txTo, inIdx, hashtype, amount=0, sigversion=SIGVERS
     If you're just writing wallet software you probably want SignatureHash()
     instead.
     """
+    assert sigversion in (SIGVERSION_BASE, SIGVERSION_WITNESS_V0)
+
     HASH_ONE = b'\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
 
     if sigversion == SIGVERSION_WITNESS_V0:
@@ -1023,10 +1031,12 @@ def RawSignatureHash(script, txTo, inIdx, hashtype, amount=0, sigversion=SIGVERS
 
     if inIdx >= len(txTo.vin):
         return (HASH_ONE, "inIdx %d out of range (%d)" % (inIdx, len(txTo.vin)))
+
     txtmp = bitcointx.core.CMutableTransaction.from_tx(txTo)
 
     for txin in txtmp.vin:
         txin.scriptSig = b''
+
     txtmp.vin[inIdx].scriptSig = FindAndDelete(script, CScript([OP_CODESEPARATOR]))
 
     if (hashtype & 0x1f) == SIGHASH_NONE:
@@ -1057,7 +1067,7 @@ def RawSignatureHash(script, txTo, inIdx, hashtype, amount=0, sigversion=SIGVERS
         txtmp.vin.append(tmp)
 
     txtmp.wit = bitcointx.core.CTxWitness()
-    s = txtmp.serialize()
+    s = txtmp.serialize({'for_sighash': True})
     s += struct.pack(b"<i", hashtype)
 
     hash = bitcointx.core.Hash(s)
@@ -1102,10 +1112,14 @@ class CBitcoinScript(CScriptBase):
     pass
 
 
-def _SetScriptClassParams(script_cls):
+def _SetScriptClassParams(script_cls, subst_funcs):
+    global _raw_signature_hash_func
     _script_class_params[CScript] = script_cls
+    _raw_signature_hash_func = subst_funcs['RawSignatureHash']
 
-_SetScriptClassParams(CBitcoinScript)
+
+_SetScriptClassParams(CBitcoinScript,
+                      {'RawSignatureHash': RawBitcoinSignatureHash})
 
 __all__ = (
     'MAX_SCRIPT_SIZE',
@@ -1247,6 +1261,7 @@ __all__ = (
     'SIGHASH_ANYONECANPAY',
     'FindAndDelete',
     'RawSignatureHash',
+    'RawBitcoinSignatureHash',
     'SignatureHash',
     'IsLowDERSignature',
 

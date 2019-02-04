@@ -16,8 +16,9 @@ import unittest
 import bitcointx
 from bitcointx.core import x
 from bitcointx.wallet import (
-    CBitcoinAddress, P2PKHConfidentialAddress, P2PKHBitcoinAddress
+    CBitcoinAddress, P2PKHBitcoinAddress
 )
+from bitcointx.sidechain.elements import P2PKHConfidentialAddress
 
 
 class Test_ConfidentialAddress(unittest.TestCase):

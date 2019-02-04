@@ -279,60 +279,6 @@ class P2PKHBitcoinAddress(CBase58BitcoinAddress):
         return self.to_scriptPubKey()
 
 
-class ConfidentialAddress(CBase58BitcoinAddress):
-
-    @classmethod
-    def _base58_submatch(cls, data, prefix):
-        for subclass in cls.__subclasses__():
-            assert len(subclass.base58_prefix) == 2
-            assert prefix == subclass.base58_prefix[:1]
-            if data[0] == subclass.base58_prefix[1]:
-                return subclass, data[1:], subclass.base58_prefix
-        raise CBitcoinAddressError('Sub-version %d not a recognized Confidential Address' % data[0])
-
-    @classmethod
-    def from_unconfidential(cls, unconfidential_adr, blinding_pubkey):
-        """Convert unconfidential address to confidential
-
-        Raises CBitcoinAddressError if blinding_pubkey is invalid
-
-        unconfidential_adr can be string or CBase58BitcoinAddress instance
-        blinding_pubkey must be a bytes instance
-        """
-        if not isinstance(blinding_pubkey, bytes):
-            raise TypeError('blinding_pubkey must be bytes instance; got %r' % blinding_pubkey.__class__)
-        if not isinstance(blinding_pubkey, bitcointx.core.key.CPubKey):
-            blinding_pubkey = bitcointx.core.key.CPubKey(blinding_pubkey)
-        if not blinding_pubkey.is_fullyvalid:
-            raise CBitcoinAddressError('invalid blinding pubkey')
-
-        if not isinstance(unconfidential_adr, CBase58BitcoinAddress):
-            unconfidential_adr = CBase58BitcoinAddress(unconfidential_adr)
-
-        if len(cls.base58_prefix) > 1 and unconfidential_adr.prefix != cls.base58_prefix[1:]:
-            raise CBitcoinAddressError('cannot create {} from {}: inner prefix mismatch'
-                                       .format(cls, unconfidential_adr.__class__.__name__))
-
-        return CBase58BitcoinAddress.from_bytes(
-            unconfidential_adr.base58_prefix + blinding_pubkey + unconfidential_adr,
-            cls.base58_prefix[0:1])
-
-    def to_unconfidential(self):
-        return CBase58BitcoinAddress.from_bytes(self[33:], self.base58_prefix[1:2])
-
-    @property
-    def blinding_pubkey(self):
-        return bitcointx.core.key.CPubKey(self[0:33])
-
-
-class P2PKHConfidentialAddress(ConfidentialAddress):
-    pass
-
-
-class P2SHConfidentialAddress(ConfidentialAddress):
-    pass
-
-
 class P2WSHBitcoinAddress(CBech32BitcoinAddress):
 
     @classmethod
@@ -473,16 +419,13 @@ class CBitcoinExtKey(bitcointx.base58.CBase58PrefixedData, bitcointx.core.key.CE
 _Base58PrefixMap = {
     P2PKHBitcoinAddress: 'PUBKEY_ADDR',
     P2SHBitcoinAddress: 'SCRIPT_ADDR',
-    ConfidentialAddress: 'CONFIDENTIAL_ADDR',
-    P2PKHConfidentialAddress: 'CONFIDENTIAL_PUBKEY_ADDR',
-    P2SHConfidentialAddress: 'CONFIDENTIAL_SCRIPT_ADDR',
     CBitcoinSecret: 'SECRET_KEY',
     CBitcoinExtKey: 'EXTENDED_PRIVKEY',
     CBitcoinExtPubKey: 'EXTENDED_PUBKEY',
 }
 
 
-def _SetBase58Prefixes():
+def _SetBase58Prefixes(extra_base58_prefix_map=None):
 
     def ensure_pfx_bytes(prefix):
         if isinstance(prefix, int):
@@ -490,7 +433,11 @@ def _SetBase58Prefixes():
         assert isinstance(prefix, bytes)
         return prefix
 
-    for cls, pname in _Base58PrefixMap.items():
+    base58_prefix_map = _Base58PrefixMap.copy()
+    if extra_base58_prefix_map is not None:
+        base58_prefix_map.update(extra_base58_prefix_map)
+
+    for cls, pname in base58_prefix_map.items():
         prefix = bitcointx.params.BASE58_PREFIXES.get(pname)
         if prefix is not None:
             prefix = ensure_pfx_bytes(prefix)
@@ -505,20 +452,17 @@ def _SetBase58Prefixes():
 _SetBase58Prefixes()
 
 __all__ = (
-        'CBitcoinAddressError',
-        'CBitcoinAddress',
-        '_SetBase58Prefixes',
-        'CBase58BitcoinAddress',
-        'CBech32BitcoinAddress',
-        'P2SHBitcoinAddress',
-        'P2PKHBitcoinAddress',
-        'P2WSHBitcoinAddress',
-        'P2WPKHBitcoinAddress',
-        'ConfidentialAddress',
-        'P2SHConfidentialAddress',
-        'P2PKHConfidentialAddress',
-        'CBitcoinSecretError',
-        'CBitcoinSecret',
-        'CBitcoinExtKey',
-        'CBitcoinExtPubKey',
+    'CBitcoinAddressError',
+    'CBitcoinAddress',
+    '_SetBase58Prefixes',
+    'CBase58BitcoinAddress',
+    'CBech32BitcoinAddress',
+    'P2SHBitcoinAddress',
+    'P2PKHBitcoinAddress',
+    'P2WSHBitcoinAddress',
+    'P2WPKHBitcoinAddress',
+    'CBitcoinSecretError',
+    'CBitcoinSecret',
+    'CBitcoinExtKey',
+    'CBitcoinExtPubKey',
 )

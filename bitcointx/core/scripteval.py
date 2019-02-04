@@ -466,7 +466,7 @@ def _CheckMultiSig(opcode, script, stack, txTo, inIdx, flags, err_raiser, nOpCou
 
     while i > 1:
         if not success and SCRIPT_VERIFY_NULLFAIL in flags and ikey2 == 0 and len(stack[-1]):
-            raise VerifyScriptError("signature check failed, and of the signatures are not empty")
+            raise VerifyScriptError("signature check failed, and some of the signatures are not empty")
 
         if ikey2 > 0:
             ikey2 -= 1

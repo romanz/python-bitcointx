@@ -23,14 +23,21 @@ from bitcointx.core import (
     CTransaction, CTxIn, CMutableTxIn, CMutableTransaction,
     CMutableTxOut
 )
-from bitcointx.core.script import CScript, OP_RETURN
+from bitcointx.core.script import (
+    CScript, OP_RETURN, SignatureHash,
+    SIGHASH_ALL, SIGVERSION_BASE, OP_CHECKMULTISIG
+)
+from bitcointx.core.scripteval import VerifyScript
 from bitcointx.core.key import CPubKey, CKey
 from bitcointx.sidechain.elements import (
     CAsset, CConfidentialValue, CConfidentialAsset, CConfidentialNonce,
     calculate_asset, generate_asset_entropy, calculate_reissuance_token,
     unblind_confidential_pair
 )
-from bitcointx.wallet import CBitcoinAddress
+from bitcointx.wallet import (
+    CBitcoinAddress, CBitcoinSecret,
+    P2PKHBitcoinAddress, P2SHBitcoinAddress
+)
 from bitcointx.core.secp256k1 import secp256k1_has_zkp
 
 zkp_unavailable_warning_shown = False
@@ -269,7 +276,7 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                                          b2x(tx.vin[n].assetIssuance.nInflationKeys.commitment))
 
     def check_blind(self, unblinded_tx, unblinded_tx_raw, blinded_tx, blinded_tx_raw, bundle,
-                    blinding_derivation_key):
+                    blinding_derivation_key, asset_commitments=()):
         amounts = []
         blinders = []
         assets = []
@@ -280,13 +287,10 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
             assets.append(CAsset(lx(utxo['asset'])))
             assetblinders.append(Uint256(lx(utxo['assetblinder'])))
 
-        def rand_func(n):
-            return bytes([random.randint(0, 255) for _ in range(n)])
-
         num_to_blind = 0
         output_pubkeys = []
         for vout in unblinded_tx.vout:
-            if not vout.nNonce.is_null():
+            if not vout.nNonce.is_null() and vout.nValue.is_explicit():
                 output_pubkeys.append(CPubKey(vout.nNonce.commitment))
                 num_to_blind += 1
             else:
@@ -315,7 +319,23 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                 blind_issuance_asset_keys.append(None)
                 blind_issuance_token_keys.append(None)
 
+        # Deterministic random was used when generating test transactions,
+        # to have reproducible results. We need to set the random seed
+        # to the same value that was used when test data was generated.
+        # (see note below on that supplying _rand_func parameter to blind()
+        #  is intended only for testing code, not for production)
         random.seed(bundle['rand_seed'])
+
+        def rand_func(n):
+            return bytes([random.randint(0, 255) for _ in range(n)])
+
+        # Auxiliary generators will be be non-empty only for the case
+        # when we are blinding different transaction templates that is
+        # then combined into one common transaction, that is done in
+        # test_split_blinding_multi_sign().
+        # In this case, you need to supply the asset commitments for
+        # all of the inputs of the final transaction, even if currently
+        # blinded transaction template does not contain these inputs.
         blind_result = tx_to_blind.blind(
             input_blinding_factors=blinders,
             input_asset_blinding_factors=assetblinders,
@@ -324,13 +344,41 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
             output_pubkeys=output_pubkeys,
             blind_issuance_asset_keys=blind_issuance_asset_keys,
             blind_issuance_token_keys=blind_issuance_token_keys,
+            auxiliary_generators=asset_commitments,
+
+            # IMPORTANT NOTE:
+            # Specifying custom _rand_func is only required for testing.
+            # Here we use it to supply deterministically generated
+            # pseudo-random bytes, so that blinding results will match the test
+            # data that was generated using deterministically generated random
+            # bytes, with seed values that are saved in 'rand_seed' fields of
+            # test data bunldes.
+            #
+            # In normal code you do should NOT specify _rand_func:
+            # os.urandom will be used by default (os.urandom is suitable for cryptographic use)
             _rand_func=rand_func
         )
 
         self.assertIsNotNone(blind_result)
 
-        num_successfully_blinded, _ = blind_result
-        self.assertEqual(num_successfully_blinded, num_to_blind)
+        if all(_k is None for _k in blind_issuance_asset_keys):
+            random.seed(bundle['rand_seed'])
+            tx_to_blind2 = unblinded_tx.to_mutable()
+            blind_result2 = tx_to_blind2.blind(
+                input_blinding_factors=blinders,
+                input_asset_blinding_factors=assetblinders,
+                input_assets=assets,
+                input_amounts=amounts,
+                output_pubkeys=output_pubkeys,
+                blind_issuance_asset_keys=blind_issuance_asset_keys,
+                blind_issuance_token_keys=blind_issuance_token_keys,
+                auxiliary_generators=asset_commitments,
+                _rand_func=rand_func
+            )
+            assert(blind_result == blind_result2)
+            assert(tx_to_blind.serialize() == tx_to_blind2.serialize())
+
+        self.assertEqual(blind_result.num_successfully_blinded, num_to_blind)
         self.assertNotEqual(unblinded_tx_raw, tx_to_blind.serialize())
         self.assertEqual(blinded_tx_raw, tx_to_blind.serialize())
 
@@ -338,6 +386,11 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                       bundle, blinding_derivation_key):
         for n, bvout in enumerate(blinded_tx.vout):
             uvout = unblinded_tx.vout[n]
+
+            if not uvout.nValue.is_explicit():
+                # skip confidential vouts of partially-blinded txs
+                continue
+
             self.assertEqual(bvout.scriptPubKey, uvout.scriptPubKey)
             if bvout.nAsset.is_explicit():
                 self.assertTrue(bvout.nValue.is_explicit())
@@ -371,6 +424,42 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                     self.assertEqual(ub_info['asset_blinding_factor'],
                                      unblind_result.asset_blinding_factor.to_hex())
 
+    def check_sign(self, blinded_tx, signed_tx, bundle):
+        tx_to_sign = blinded_tx.to_mutable()
+        for n, vin in enumerate(tx_to_sign.vin):
+            utxo = bundle['vin_utxo'][n]
+            amount = int(round(utxo['amount']*COIN))
+
+            scriptPubKey = CScript(x(utxo['scriptPubKey']))
+            a = CBitcoinAddress(utxo['address'])
+            if 'privkey' in utxo:
+                privkey = CBitcoinSecret(utxo['privkey'])
+                assert isinstance(a, P2PKHBitcoinAddress),\
+                    "only P2PKH address signing is tested for now."
+                assert a == P2PKHBitcoinAddress.from_pubkey(privkey.pub)
+                assert scriptPubKey == a.to_scriptPubKey()
+                sighash = SignatureHash(scriptPubKey, tx_to_sign, n, SIGHASH_ALL,
+                                        amount=amount, sigversion=SIGVERSION_BASE)
+                sig = privkey.sign(sighash) + bytes([SIGHASH_ALL])
+                tx_to_sign.vin[n].scriptSig = CScript([CScript(sig), CScript(privkey.pub)])
+            else:
+                pk_list = [CBitcoinSecret(pk) for pk in utxo['privkey_list']]
+                redeem_script = [utxo['num_p2sh_participants']]
+                redeem_script.extend([pk.pub for pk in pk_list])
+                redeem_script.extend([len(pk_list), OP_CHECKMULTISIG])
+                redeem_script = CScript(redeem_script)
+                assert scriptPubKey == redeem_script.to_p2sh_scriptPubKey()
+                assert a == P2SHBitcoinAddress.from_scriptPubKey(
+                    redeem_script.to_p2sh_scriptPubKey())
+                sighash = SignatureHash(redeem_script, tx_to_sign, n, SIGHASH_ALL,
+                                        amount=amount, sigversion=SIGVERSION_BASE)
+                sigs = [pk.sign(sighash) + bytes([SIGHASH_ALL]) for pk in pk_list]
+                tx_to_sign.vin[n].scriptSig = CScript([0] + sigs + [redeem_script])
+
+            VerifyScript(tx_to_sign.vin[n].scriptSig, scriptPubKey, tx_to_sign, n, amount=amount)
+
+        self.assertEqual(tx_to_sign.serialize(), signed_tx.serialize())
+
     def test_blind_unnblind_sign(self):
         if not secp256k1_has_zkp:
             warn_zkp_unavailable()
@@ -390,6 +479,7 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                 self.check_serialize_deserialize(unblinded_tx, unblinded_tx_raw, bundle['unblinded'])
                 signed_tx_raw = x(bundle['signed_hex'])
                 signed_tx = CTransaction.deserialize(signed_tx_raw)
+                self.assertEqual(signed_tx.serialize(), signed_tx_raw)
                 blinding_derivation_key = CKey(lx(bundle['blinding_derivation_key']))
 
                 # ensure that str and repr works
@@ -421,3 +511,51 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                 self.check_unblind(unblinded_tx, unblinded_tx_raw,
                                    blinded_tx, blinded_tx_raw,
                                    bundle, blinding_derivation_key)
+
+                self.check_sign(blinded_tx, signed_tx, bundle)
+
+    def test_split_blinding_multi_sign(self):
+        if not secp256k1_has_zkp:
+            warn_zkp_unavailable()
+            return
+
+        with open(os.path.dirname(__file__)
+                  + '/data/elements_sidechain_txs_split_blinding.json', 'r') as fd:
+            split_blind_txdata = json.load(fd)
+            # we need to supply asset commitments from all inputs of the final
+            # tranaction to the blinding function, even if we are blinding a tx
+            # template that does not contain these inputs
+            asset_commitments = [x(utxo['assetcommitment'])
+                                 for utxo in split_blind_txdata['tx2']['vin_utxo']]
+
+            for txlabel in ('tx1', 'tx2'):
+                bundle = split_blind_txdata[txlabel]
+                blinded_tx_raw = x(bundle['blinded']['hex'])
+                blinded_tx = CTransaction.deserialize(blinded_tx_raw)
+                self.assertEqual(blinded_tx.serialize(), blinded_tx_raw)
+                self.check_serialize_deserialize(blinded_tx, blinded_tx_raw, bundle['blinded'])
+                unblinded_tx_raw = x(bundle['unblinded']['hex'])
+                unblinded_tx = CTransaction.deserialize(unblinded_tx_raw)
+
+                self.assertEqual(unblinded_tx.serialize(), unblinded_tx_raw)
+                self.check_serialize_deserialize(unblinded_tx, unblinded_tx_raw, bundle['unblinded'])
+                if 'signed_hex' in bundle:
+                    signed_tx_raw = x(bundle['signed_hex'])
+                    signed_tx = CTransaction.deserialize(signed_tx_raw)
+                    self.assertEqual(signed_tx.serialize(), signed_tx_raw)
+                else:
+                    signed_tx = None
+
+                blinding_derivation_key = CKey(lx(bundle['blinding_derivation_key']))
+
+                self.check_blind(unblinded_tx, unblinded_tx_raw,
+                                 blinded_tx, blinded_tx_raw,
+                                 bundle, blinding_derivation_key,
+                                 asset_commitments=asset_commitments)
+
+                self.check_unblind(unblinded_tx, unblinded_tx_raw,
+                                   blinded_tx, blinded_tx_raw,
+                                   bundle, blinding_derivation_key)
+
+                if signed_tx is not None:
+                    self.check_sign(blinded_tx, signed_tx, bundle)
