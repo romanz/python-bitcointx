@@ -599,8 +599,6 @@ class CMutableTransactionBase(CTransactionBase):
         if witness is None or witness.is_null():
             witness = wclass([wclass._txin_witness_class() for dummy in range(len(vin))],
                              [wclass._txout_witness_class() for dummy in range(len(vout))])
-        else:
-            witness = wclass.from_witness(witness)
 
         self.wit = witness
 

@@ -32,7 +32,6 @@ from bitcointx.core.key import CPubKey, CKey
 from bitcointx.sidechain.elements import (
     CAsset, CConfidentialValue, CConfidentialAsset, CConfidentialNonce,
     calculate_asset, generate_asset_entropy, calculate_reissuance_token,
-    unblind_confidential_pair
 )
 from bitcointx.wallet import (
     CBitcoinAddress, CBitcoinSecret,
@@ -407,9 +406,7 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                 else:
                     blinding_key = uvout.scriptPubKey.derive_blinding_key(blinding_derivation_key)
 
-                unblind_result = unblind_confidential_pair(
-                    blinding_key, bvout.nValue, bvout.nAsset, bvout.nNonce,
-                    bvout.scriptPubKey, blinded_tx.wit.vtxoutwit[n].rangeproof)
+                unblind_result = bvout.unblind(blinding_key, blinded_tx.wit.vtxoutwit[n].rangeproof)
 
                 self.assertIsNotNone(unblind_result)
                 self.assertEqual(uvout.nValue.to_amount(), unblind_result.amount)
@@ -435,7 +432,7 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
             if 'privkey' in utxo:
                 privkey = CBitcoinSecret(utxo['privkey'])
                 assert isinstance(a, P2PKHBitcoinAddress),\
-                    "only P2PKH address signing is tested for now."
+                    "only P2PKH is supported for single-sig"
                 assert a == P2PKHBitcoinAddress.from_pubkey(privkey.pub)
                 assert scriptPubKey == a.to_scriptPubKey()
                 sighash = SignatureHash(scriptPubKey, tx_to_sign, n, SIGHASH_ALL,
@@ -448,6 +445,8 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                 redeem_script.extend([pk.pub for pk in pk_list])
                 redeem_script.extend([len(pk_list), OP_CHECKMULTISIG])
                 redeem_script = CScript(redeem_script)
+                assert isinstance(a, P2SHBitcoinAddress),\
+                    "only P2SH is supported for multi-sig."
                 assert scriptPubKey == redeem_script.to_p2sh_scriptPubKey()
                 assert a == P2SHBitcoinAddress.from_scriptPubKey(
                     redeem_script.to_p2sh_scriptPubKey())

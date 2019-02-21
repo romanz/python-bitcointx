@@ -123,6 +123,12 @@ class CConfidentialAddress(CBase58BitcoinAddress):
     def blinding_pubkey(self):
         return CPubKey(self[0:33])
 
+    def to_scriptPubKey(self):
+        return self.to_unconfidential().to_scriptPubKey()
+
+    def to_redeemScript(self):
+        return self.to_unconfidential().to_scriptPubKey()
+
 
 class P2PKHConfidentialAddress(CConfidentialAddress):
     pass
@@ -130,7 +136,6 @@ class P2PKHConfidentialAddress(CConfidentialAddress):
 
 class P2SHConfidentialAddress(CConfidentialAddress):
     pass
-
 
 
 class CConfidentialCommitmentBase(ImmutableSerializable):
@@ -676,6 +681,11 @@ class CElementsSidechainTxOut(CTxOutBase, ReprOrStrMixin):
             'Mutable' if self._immutable_restriction_lifted else '',
             strfn(self.nValue), repr(self.scriptPubKey), strfn(self.nAsset),
             strfn(self.nNonce))
+
+    def unblind(self, blinding_key=None, rangeproof=None):
+        return unblind_confidential_pair(
+            blinding_key, self.nValue, self.nAsset, self.nNonce,
+            self.scriptPubKey, rangeproof)
 
     @classmethod
     def from_txout(cls, txout):
