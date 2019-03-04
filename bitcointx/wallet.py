@@ -271,7 +271,7 @@ class P2PKHBitcoinAddress(CBase58BitcoinAddress):
 
         raise CBitcoinAddressError('not a P2PKH scriptPubKey')
 
-    def to_scriptPubKey(self, nested=False):
+    def to_scriptPubKey(self):
         """Convert an address to a scriptPubKey"""
         return script.CScript([script.OP_DUP, script.OP_HASH160, self, script.OP_EQUALVERIFY, script.OP_CHECKSIG])
 
