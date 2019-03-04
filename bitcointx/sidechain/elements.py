@@ -77,7 +77,7 @@ class TxInSerializationError(SerializationError):
     pass
 
 
-class ConfidentialAddress(CBase58BitcoinAddress):
+class CConfidentialAddress(CBase58BitcoinAddress):
 
     @classmethod
     def _base58_submatch(cls, data, prefix):
@@ -105,6 +105,7 @@ class ConfidentialAddress(CBase58BitcoinAddress):
             raise CBitcoinAddressError('invalid blinding pubkey')
 
         if not isinstance(unconfidential_adr, CBase58BitcoinAddress):
+            assert isinstance(unconfidential_adr, str)
             unconfidential_adr = CBase58BitcoinAddress(unconfidential_adr)
 
         if len(cls.base58_prefix) > 1 and unconfidential_adr.prefix != cls.base58_prefix[1:]:
@@ -123,11 +124,11 @@ class ConfidentialAddress(CBase58BitcoinAddress):
         return CPubKey(self[0:33])
 
 
-class P2PKHConfidentialAddress(ConfidentialAddress):
+class P2PKHConfidentialAddress(CConfidentialAddress):
     pass
 
 
-class P2SHConfidentialAddress(ConfidentialAddress):
+class P2SHConfidentialAddress(CConfidentialAddress):
     pass
 
 
@@ -1323,7 +1324,7 @@ class ElementsSidechainParams(CoreElementsSidechainParams):
                        'EXTENDED_PRIVKEY': b'\x04\x35\x83\x94'}
 
     EXTRA_BASE58_ADDRESS_CLASS_MAP = {
-        ConfidentialAddress: 'CONFIDENTIAL_ADDR',
+        CConfidentialAddress: 'CONFIDENTIAL_ADDR',
         P2PKHConfidentialAddress: 'CONFIDENTIAL_PUBKEY_ADDR',
         P2SHConfidentialAddress: 'CONFIDENTIAL_SCRIPT_ADDR',
     }
@@ -1655,7 +1656,7 @@ __all__ = (
     'generate_asset_entropy',
     'calculate_asset',
     'calculate_reissuance_token',
-    'ConfidentialAddress',
+    'CConfidentialAddress',
     'P2SHConfidentialAddress',
     'P2PKHConfidentialAddress',
 )
