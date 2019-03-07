@@ -1,3 +1,5 @@
+XXX Work in progress
+
 This directory contains two example programs that demonstrate usage of Elements sidechain confidential transaction blinding and unblinding functionality of python-bitcointx.
 
 unblind.py takes hex-encoded transaction and blinding key, and successively tries to unblind the outputs of this transaction with the given blinding key.

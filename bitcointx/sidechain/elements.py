@@ -860,6 +860,10 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
 
         if auxiliary_generators:
             assert len(auxiliary_generators) >= len(self.vin)
+            # We might have allow to set None for unused assetcommitments,
+            # but the Elements Core API requires all assetcommitments to be
+            # specified ad 33-byte chunks.
+            # We do the same, to be close to the originial.
             assert all(isinstance(ag, bytes) for ag in auxiliary_generators)
             assert all(len(ag) == 33 for ag in auxiliary_generators)
 
@@ -1697,6 +1701,8 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
 
 def derive_blinding_key(blinding_derivation_key, script):
     assert isinstance(blinding_derivation_key, CKeyMixin)
+    # based on Elements Core's blinding key derivation logic
+    # as of commit 43f6cdbd3147d9af450b73c8b8b8936e3e4166df
     return CKey(hmac.new(blinding_derivation_key.secret_bytes, script,
                          hashlib.sha256).digest())
 
