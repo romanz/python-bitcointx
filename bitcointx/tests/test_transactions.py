@@ -15,7 +15,15 @@ import json
 import unittest
 import os
 
-from bitcointx.core import *
+from bitcointx.core import (
+    x, lx, b2x,
+    CTransaction, CMutableTransaction, COutPoint, CMutableOutPoint,
+    CTxIn, CTxOut, CMutableTxIn, CMutableTxOut,
+    CTxWitness, CTxInWitness,
+    CMutableTxWitness, CMutableTxInWitness,
+    CheckTransaction, CheckTransactionError, ValidationError
+)
+from bitcointx.core.script import CScript, CScriptWitness
 from bitcointx.core.scripteval import VerifyScript, SCRIPT_VERIFY_P2SH
 
 from bitcointx.tests.test_scripteval import parse_script
@@ -89,6 +97,15 @@ class Test_CMutableOutPoint(unittest.TestCase):
 
         self.assertNotEqual(h1, outpoint.GetHash())
 
+    def test_repr(self):
+        def T(outpoint, expected):
+            actual = repr(outpoint)
+            self.assertEqual(actual, expected)
+        T( CMutableOutPoint(),
+          'CMutableOutPoint()')
+        T( CMutableOutPoint(lx('4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b'), 0),
+          "CMutableOutPoint(lx('4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b'), 0)")
+
 
 class Test_CTxIn(unittest.TestCase):
     def test_is_final(self):
@@ -118,6 +135,14 @@ class Test_CMutableTxIn(unittest.TestCase):
         txin.prevout.n = 1
 
         self.assertNotEqual(h1, txin.GetHash())
+
+    def test_repr(self):
+        def T(txin, expected):
+            actual = repr(txin)
+            self.assertEqual(actual, expected)
+        T( CMutableTxIn(),
+          'CMutableTxIn(CMutableOutPoint(), CScript([]), 0xffffffff)')
+
 
 class Test_CTransaction(unittest.TestCase):
     def test_is_coinbase(self):
@@ -188,3 +213,64 @@ class Test_CTransaction(unittest.TestCase):
             itx.nVersion = 2
         with self.assertRaises(AttributeError):
             itx.vin.append(CTxIn())
+
+    def test_mutable_tx_creation_with_immutable_parts_specified(self):
+        tx = CMutableTransaction(
+            vin=[CTxIn(prevout=COutPoint(hash=b'a'*32, n=0))],
+            vout=[CTxOut(nValue=1)],
+            witness=CTxWitness([CTxInWitness()]))
+
+        def check_mutable_parts(tx):
+            self.assertTrue(tx.vin[0]._immutable_restriction_lifted)
+            self.assertTrue(tx.vin[0].prevout._immutable_restriction_lifted)
+            self.assertTrue(tx.vout[0]._immutable_restriction_lifted)
+            self.assertTrue(tx.wit._immutable_restriction_lifted)
+            self.assertTrue(tx.wit.vtxinwit[0]._immutable_restriction_lifted)
+
+        check_mutable_parts(tx)
+
+        # Test that if we deserialize with CMutableTransaction,
+        # all the parts are mutable
+        tx = CMutableTransaction.deserialize(tx.serialize())
+        check_mutable_parts(tx)
+
+        # Test some parts separately, because when created via
+        # CMutableTransaction instantiation, they are created with from_*
+        # methods, and not directly
+
+        txin = CMutableTxIn(prevout=COutPoint(hash=b'a'*32, n=0))
+        self.assertTrue(txin.prevout._immutable_restriction_lifted)
+
+        wit = CMutableTxWitness((CTxInWitness(),))
+        self.assertTrue(wit.vtxinwit[0]._immutable_restriction_lifted)
+
+    def test_immutable_tx_creation_with_mutable_parts_specified(self):
+        tx = CTransaction(
+            vin=[CMutableTxIn(prevout=COutPoint(hash=b'a'*32, n=0))],
+            vout=[CMutableTxOut(nValue=1)],
+            witness=CMutableTxWitness(
+                [CMutableTxInWitness(CScriptWitness([CScript([0])]))]))
+
+        def check_immutable_parts(tx):
+            self.assertTrue(not tx.vin[0]._immutable_restriction_lifted)
+            self.assertTrue(not tx.vin[0].prevout._immutable_restriction_lifted)
+            self.assertTrue(not tx.vout[0]._immutable_restriction_lifted)
+            self.assertTrue(not tx.wit._immutable_restriction_lifted)
+            self.assertTrue(not tx.wit.vtxinwit[0]._immutable_restriction_lifted)
+
+        check_immutable_parts(tx)
+
+        # Test that if we deserialize with CTransaction,
+        # all the parts are immutable
+        tx = CTransaction.deserialize(tx.serialize())
+        check_immutable_parts(tx)
+
+        # Test some parts separately, because when created via
+        # CMutableTransaction instantiation, they are created with from_*
+        # methods, and not directly
+
+        txin = CTxIn(prevout=CMutableOutPoint(hash=b'a'*32, n=0))
+        self.assertTrue(not txin.prevout._immutable_restriction_lifted)
+
+        wit = CTxWitness((CMutableTxInWitness(),))
+        self.assertTrue(not wit.vtxinwit[0]._immutable_restriction_lifted)

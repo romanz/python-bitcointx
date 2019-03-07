@@ -428,8 +428,14 @@ class CElementsSidechainTxWitness(CTxWitnessBase, ReprOrStrMixin):
     __slots__ = ['vtxinwit', 'vtxoutwit']
 
     def __init__(self, vtxinwit=(), vtxoutwit=()):
-        object.__setattr__(self, 'vtxinwit', tuple(vtxinwit))
-        object.__setattr__(self, 'vtxoutwit', tuple(vtxoutwit))
+        object.__setattr__(self, 'vtxinwit',
+                           tuple(w if not w._immutable_restriction_lifted
+                                 else self._txin_witness_class.from_txin_witness(w)
+                                 for w in vtxinwit))
+        object.__setattr__(self, 'vtxoutwit',
+                           tuple(w if not w._immutable_restriction_lifted
+                                 else self._txout_witness_class.from_txout_witness(w)
+                                 for w in vtxoutwit))
 
     def is_null(self):
         for n in range(len(self.vtxinwit)):
@@ -480,8 +486,12 @@ class CElementsSidechainMutableTxWitness(CElementsSidechainTxWitness):
     _txout_witness_class = CElementsSidechainMutableTxOutWitness
 
     def __init__(self, vtxinwit=(), vtxoutwit=()):
-        self.vtxinwit = list(vtxinwit)
-        self.vtxoutwit = list(vtxoutwit)
+        self.vtxinwit = [w if w._immutable_restriction_lifted
+                         else self.__class__._txin_witness_class.from_txin_witness(w)
+                         for w in vtxinwit]
+        self.vtxoutwit = [w if w._immutable_restriction_lifted
+                          else self.__class__._txout_witness_class.from_txout_witness(w)
+                          for w in vtxoutwit]
 
     @classmethod
     def from_witness(cls, witness):
@@ -532,20 +542,20 @@ class CAssetIssuance(ImmutableSerializable, ReprOrStrMixin):
         return 'CAssetIssuance({})'.format(', '.join(r))
 
 
-class CElementsSidechainTxIn(CTxInBase, ReprOrStrMixin):
+class CElementsSidechainTxInBase(CTxInBase, ReprOrStrMixin):
     """An input of an Elements sidechain transaction
     """
     __slots__ = ['prevout', 'scriptSig', 'nSequence', 'assetIssuance', 'is_pegin']
 
-    def __init__(self, prevout=COutPoint(), scriptSig=CScript(), nSequence=0xffffffff,
+    def __init__(self, prevout=None, scriptSig=CScript(), nSequence=0xffffffff,
                  assetIssuance=CAssetIssuance(), is_pegin=False):
-        super(CElementsSidechainTxIn, self).__init__(prevout, scriptSig, nSequence)
+        super(CElementsSidechainTxInBase, self).__init__(prevout, scriptSig, nSequence)
         object.__setattr__(self, 'assetIssuance', assetIssuance)
         object.__setattr__(self, 'is_pegin', is_pegin)
 
     @classmethod
     def stream_deserialize(cls, f):
-        base = CTxInBase.stream_deserialize(f)
+        base = super(CElementsSidechainTxInBase, cls).stream_deserialize(f)
         if base.prevout.n == 0xffffffff:
             # No asset issuance for Coinbase inputs.
             has_asset_issuance = False
@@ -562,8 +572,8 @@ class CElementsSidechainTxIn(CTxInBase, ReprOrStrMixin):
             # that the in-memory index field retains its traditional
             # meaning of identifying the index into the output array
             # of the previous transaction.
-            prevout = COutPoint(base.prevout.hash,
-                                base.prevout.n & OUTPOINT_INDEX_MASK)
+            prevout = cls._outpoint_class(base.prevout.hash,
+                                          base.prevout.n & OUTPOINT_INDEX_MASK)
 
         if has_asset_issuance:
             assetIssuance = CAssetIssuance.stream_deserialize(f)
@@ -587,14 +597,25 @@ class CElementsSidechainTxIn(CTxInBase, ReprOrStrMixin):
                     n |= OUTPOINT_ISSUANCE_FLAG
                 if self.is_pegin:
                     n |= OUTPOINT_PEGIN_FLAG
-            outpoint = COutPoint(self.prevout.hash, n)
+            outpoint = self._outpoint_class(self.prevout.hash, n)
 
-        COutPoint.stream_serialize(outpoint, f)
+        self._outpoint_class.stream_serialize(outpoint, f)
         BytesSerializer.stream_serialize(self.scriptSig, f)
         f.write(struct.pack(b"<I", self.nSequence))
 
         if has_asset_issuance:
             self.assetIssuance.stream_serialize(f)
+
+    def _repr_or_str(self, strfn):
+        return "C%sTxIn(%s, %s, 0x%x, %s, is_pegin=%r)" % (
+            'Mutable' if self._immutable_restriction_lifted else '',
+            strfn(self.prevout), repr(self.scriptSig),
+            self.nSequence, strfn(self.assetIssuance),
+            self.is_pegin)
+
+
+class CElementsSidechainTxIn(CElementsSidechainTxInBase):
+    _outpoint_class = COutPoint
 
     @classmethod
     def from_txin(cls, txin):
@@ -606,34 +627,20 @@ class CElementsSidechainTxIn(CTxInBase, ReprOrStrMixin):
             # txin is immutable, therefore returning same txin is OK
             return txin
         else:
-            return cls(COutPoint.from_outpoint(txin.prevout), txin.scriptSig, txin.nSequence,
+            return cls(txin.prevout, txin.scriptSig, txin.nSequence,
                        txin.assetIssuance, txin.is_pegin)
-
-    def _repr_or_str(self, strfn):
-        return "C%sTxIn(%s, %s, 0x%x, %s, is_pegin=%r)" % (
-            'Mutable' if self._immutable_restriction_lifted else '',
-            strfn(self.prevout), repr(self.scriptSig),
-            self.nSequence, strfn(self.assetIssuance),
-            self.is_pegin)
 
 
 @make_mutable
-class CElementsSidechainMutableTxIn(CElementsSidechainTxIn):
+class CElementsSidechainMutableTxIn(CElementsSidechainTxInBase):
     """A mutable Elements sidechain CTxIn"""
     __slots__ = []
-
-    def __init__(self, prevout=None, scriptSig=CScript(), nSequence=0xffffffff,
-                 assetIssuance=CAssetIssuance(), is_pegin=False):
-        if prevout is None:
-            prevout = CMutableOutPoint()
-        super(CElementsSidechainMutableTxIn, self).__init__(prevout, scriptSig, nSequence,
-                                                            assetIssuance, is_pegin)
+    _outpoint_class = CMutableOutPoint
 
     @classmethod
     def from_txin(cls, txin):
         """Create a fully mutable copy of an existing Elements sidechain TxIn"""
-        prevout = CMutableOutPoint.from_outpoint(txin.prevout)
-        return cls(prevout, txin.scriptSig, txin.nSequence, txin.assetIssuance, txin.is_pegin)
+        return cls(txin.prevout, txin.scriptSig, txin.nSequence, txin.assetIssuance, txin.is_pegin)
 
 
 class CElementsSidechainTxOut(CTxOutBase, ReprOrStrMixin):
@@ -734,8 +741,10 @@ class CElementsSidechainTransactionCommon():
         if markerbyte == 0 and flagbyte == 1:
             vin = VectorSerializer.stream_deserialize(cls._txin_class, f)
             vout = VectorSerializer.stream_deserialize(cls._txout_class, f)
-            wit = cls._witness_class(tuple(0 for dummy in range(len(vin))),
-                                     tuple(0 for dummy in range(len(vout))))
+            wit = cls._witness_class(tuple(cls._witness_class._txin_witness_class()
+                                           for dummy in range(len(vin))),
+                                     tuple(cls._witness_class._txout_witness_class()
+                                           for dummy in range(len(vout))))
             # Note: nLockTime goes before witness in Elements sidechain transactions
             nLockTime = struct.unpack(b"<I", ser_read(f, 4))[0]
             wit = wit.stream_deserialize(f)
