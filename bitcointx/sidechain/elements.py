@@ -842,10 +842,18 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                                   blinding_factors=output_blinding_factors,
                                   asset_blinding_factors=output_asset_blinding_factors)
 
+        # Each input might contain up to two issuance pseudo-inputs,
+        # thus there might be upt to 3 surjection trargets per input
+        num_targets = len(self.vin)*3
+
         if auxiliary_generators:
             assert len(auxiliary_generators) >= len(self.vin)
             assert all(isinstance(ag, bytes) for ag in auxiliary_generators)
             assert all(len(ag) == 33 for ag in auxiliary_generators)
+
+            # auxiliary_generators beyond the length of the input array
+            # will also be used to fill surjectionTargets and targetAssetGenerators
+            num_targets += len(auxiliary_generators)-len(self.vin)
 
         output_blinding_factors = [None for _ in range(len(self.vout))]
         output_asset_blinding_factors = [None for _ in range(len(self.vout))]
@@ -857,10 +865,9 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
         # Surjection proof prep
 
         # Needed to surj init, only matches to output asset matters, rest can be garbage
-        surjectionTargets = [None for _ in range(len(self.vin)*3)]
-
+        surjectionTargets = [None for _ in range(num_targets)]
         # Needed to construct the proof itself. Generators must match final transaction to be valid
-        targetAssetGenerators = [None for _ in range(len(self.vin)*3)]
+        targetAssetGenerators = [None for _ in range(num_targets)]
 
         # input_asset_blinding_factors is only for inputs, not for issuances(0 by def)
         # but we need to create surjection proofs against this list so we copy and insert 0's
