@@ -64,11 +64,11 @@ if __name__ == '__main__':
             print("  asset:\t\t", vout.nAsset.to_asset())
         else:
             # Try to unblind the output with the given blinding key
-            result = vout.unblind(bkey, tx.wit.vtxoutwit[n].rangeproof)
+            ok, result = vout.unblind(bkey, tx.wit.vtxoutwit[n].rangeproof)
 
-            if result is None:
+            if not ok:
                 # Nope, our blinding key is not good for this output
-                print("vout {}: cannot unblind".format(n))
+                print("vout {}: cannot unblind: {}".format(n, result))
                 print("  destination address:",
                       CBitcoinAddress.from_scriptPubKey(tx.vout[n].scriptPubKey))
                 if not tx.wit.is_null():

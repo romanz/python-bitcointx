@@ -690,6 +690,10 @@ class CElementsSidechainTxOut(CTxOutBase, ReprOrStrMixin):
             strfn(self.nNonce))
 
     def unblind(self, blinding_key=None, rangeproof=None):
+        """Unblinds a txout, given a key and a rangeproof.
+        returns a tuple of (success, result)
+        If success is True, result is UnblindConfidentialPairResult namedtuple.
+        If success is False, result is a string describing the cause of failure"""
         return unblind_confidential_pair(
             blinding_key, self.nValue, self.nAsset, self.nNonce,
             self.scriptPubKey, rangeproof)
@@ -799,6 +803,10 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
               output_pubkeys=(), blind_issuance_asset_keys=(), blind_issuance_token_keys=(),
               auxiliary_generators=(), _rand_func=os.urandom):
 
+        """Blinds the transaction. Return a tuple of (sucess, result).
+        If success is True, result is BlindingResult namedtuple.
+        If success is False, result is a string describing the cause of failure"""
+
         assert(self._immutable_restriction_lifted), "can blind only mutable transaction"
 
         # based on Elements Core's BlindTransaction() function from src/blind.cpp
@@ -821,7 +829,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
         output_blinding_factors = [None for _ in range(len(self.vout))]
         output_asset_blinding_factors = [None for _ in range(len(self.vout))]
 
-        def result_tuple(nSuccessfullyBlinded):
+        def blinding_result_tuple(nSuccessfullyBlinded):
             for i, bf in enumerate(output_blinding_factors):
                 if bf is None:
                     output_blinding_factors[i] = Uint256()
@@ -830,9 +838,9 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                 if bf is None:
                     output_asset_blinding_factors[i] = Uint256()
 
-            return BlindResult(num_successfully_blinded=nSuccessfullyBlinded,
-                               blinding_factors=output_blinding_factors,
-                               asset_blinding_factors=output_asset_blinding_factors)
+            return BlindingResult(num_successfully_blinded=nSuccessfullyBlinded,
+                                  blinding_factors=output_blinding_factors,
+                                  asset_blinding_factors=output_asset_blinding_factors)
 
         if auxiliary_generators:
             assert len(auxiliary_generators) >= len(self.vin)
@@ -872,9 +880,10 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                         secp256k1_blind_context, asset_generator, auxiliary_generators[i])
                     if result != 1:
                         assert result == 0
-                        return None
+                        return False, 'auxiliary generator %d is not valid' % i
                 else:
-                    return None
+                    return False, ('input asset %i is empty, but auxiliary_generators '
+                                   'was not supplied')
             else:
                 asset_generator = ctypes.create_string_buffer(SECP256K1_GENERATOR_SIZE)
                 ret = secp256k1.secp256k1_generator_generate_blinded(
@@ -891,8 +900,10 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
             issuance = self.vin[i].assetIssuance
 
             if not issuance.is_null():
-                if issuance.nAmount.is_commitment() or issuance.nInflationKeys.is_commitment():
-                    return None
+                if issuance.nAmount.is_commitment():
+                    return False, 'issuance is not empty, but nAmount is a commitment'
+                if issuance.nInflationKeys.is_commitment():
+                    return False, 'issuance is not empty, but nInflationKeys is a commitment'
 
                 # New Issuance
                 if issuance.assetBlindingNonce.is_null():
@@ -937,7 +948,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     gen_buf, auxiliary_generators[len(self.vin)+n])
                 if ret != 1:
                     assert ret == 0
-                    return None
+                    return False, ('auxiliary generator %d is not valid' % len(self.vin)+n)
 
                 targetAssetGenerators[totalTargets] = gen_buf.raw
                 surjectionTargets[totalTargets] = Uint256()
@@ -966,7 +977,9 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                 or not input_asset_blinding_factors[nIn].is_null()
             ):
                 if input_amounts[nIn] < 0:
-                    return None
+                    return False, ('input blinding factors (or asset blinding factors) '
+                                   'for input %d is not empty, but amount specified for '
+                                   'this input is negative' % nIn)
                 blinds.append(input_blinding_factors[nIn])
                 assetblinds.append(input_asset_blinding_factors[nIn])
                 amounts_to_blind.append(input_amounts[nIn])
@@ -977,36 +990,45 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
             if not issuance.is_null():
                 # Marked for blinding
                 if len(blind_issuance_asset_keys) > nIn and blind_issuance_asset_keys[nIn] is not None:
-                    if (
-                        issuance.nAmount.is_explicit() and
-                        (len(self.wit.vtxinwit) <= nIn
-                         or len(self.wit.vtxinwit[nIn].issuanceAmountRangeproof) == 0)
-                    ):
+                    if not issuance.nAmount.is_explicit():
+                        return False, ('blind_issuance_asset_keys is specified for input %d, ',
+                                       'but issuance.nAmount is not explicit' % nIn)
+
+                    if len(self.wit.vtxinwit) <= nIn \
+                            or len(self.wit.vtxinwit[nIn].issuanceAmountRangeproof) == 0:
                         nToBlind += 1
                     else:
-                        return None
+                        return False, ('blind_issuance_asset_keys is specified for input %d, ',
+                                       'but issuanceAmountRangeproof is already in place')
 
                 if len(blind_issuance_token_keys) > nIn and blind_issuance_token_keys[nIn] is not None:
-                    if (
-                        issuance.nInflationKeys.is_explicit() and
-                        (len(self.wit.vtxinwit) <= nIn
-                         or len(self.wit.vtxinwit[nIn].inflationKeysRangeproof) == 0)
-                    ):
+                    if not issuance.nInflationKeys.is_explicit():
+                        return False, ('blind_issuance_token_keys is specified for input %d, ',
+                                       'but issuance.nInflationKeys is not explicit' % nIn)
+                    if len(self.wit.vtxinwit) <= nIn \
+                            or len(self.wit.vtxinwit[nIn].inflationKeysRangeproof) == 0:
                         nToBlind += 1
                     else:
-                        return None
+                        return False, ('blind_issuance_token_keys is specified for input %d, ',
+                                       'but inflationKeysRangeproof is already in place')
 
         for nOut, out_pub in enumerate(output_pubkeys):
             if out_pub.is_valid:
                 # Keys must be valid and outputs completely unblinded or else call fails
-                if (
-                    not out_pub.is_fullyvalid
-                    or not self.vout[nOut].nValue.is_explicit()
-                    or not self.vout[nOut].nAsset.is_explicit()
-                    or (len(self.wit.vtxoutwit) > nOut and not self.wit.vtxoutwit[nOut].is_null())
-                    or self.vout[nOut].is_fee()
-                ):
-                    return None
+                if not out_pub.is_fullyvalid:
+                    return False, 'blinding pubkey for output %d is not valid' % nOut
+                if not self.vout[nOut].nValue.is_explicit():
+                    return False, ('valid blinding pubkey specified for output %d, '
+                                   'but nValue for this output is not explicit' % nOut)
+                if not self.vout[nOut].nAsset.is_explicit():
+                    return False, ('valid blinding pubkey specified for output %d, '
+                                   'but nAsset for this output is not explicit' % nOut)
+                if len(self.wit.vtxoutwit) > nOut and not self.wit.vtxoutwit[nOut].is_null():
+                    return False, ('valid blinding pubkey specified for output %d, '
+                                   'but txout witness for this output is already in place' % nOut)
+                if self.vout[nOut].is_fee():
+                    return False, ('valid blinding pubkey specified for output %d, '
+                                   'but this output is a fee output' % nOut)
 
                 nToBlind += 1
 
@@ -1061,7 +1083,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     if nBlindAttempts == nToBlind:
                         # All outputs we own are unblinded, we don't support this type of blinding
                         # though it is possible. No privacy gained here, incompatible with secp api
-                        return result_tuple(nSuccessfullyBlinded)
+                        return True, blinding_result_tuple(nSuccessfullyBlinded)
 
                     while len(self.wit.vtxinwit) <= nIn:
                         self.wit.vtxinwit.append(CElementsSidechainMutableTxInWitness())
@@ -1134,7 +1156,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     # Adversary would need to create all input blinds
                     # therefore would already know all your summed output amount anyways.
                     if nBlindAttempts == 1 and nBlindsIn == 0:
-                        return result_tuple(nSuccessfullyBlinded)
+                        return True, blinding_result_tuple(nSuccessfullyBlinded)
 
                     blindedAmounts = (ctypes.c_uint64 * len(amounts_to_blind))(*amounts_to_blind)
                     assetblindptrs = (ctypes.c_char_p*len(assetblinds))()
@@ -1187,7 +1209,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     # Count as success(to signal caller that nothing wrong) and return early
                     if blinds[-1].is_null():
                         nSuccessfullyBlinded += 1
-                        return result_tuple(nSuccessfullyBlinded)
+                        return True, blinding_result_tuple(nSuccessfullyBlinded)
 
                 while len(self.wit.vtxoutwit) <= nOut:
                     self.wit.vtxoutwit.append(CElementsSidechainMutableTxOutWitness())
@@ -1225,7 +1247,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                 # Successfully blinded this output
                 nSuccessfullyBlinded += 1
 
-        return result_tuple(nSuccessfullyBlinded)
+        return True, blinding_result_tuple(nSuccessfullyBlinded)
 
 
 class CElementsSidechainTransaction(CElementsSidechainTransactionCommon, CImmutableTransactionBase):
@@ -1532,6 +1554,11 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
 
 
 def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript, rangeproof):
+    """Unblinds a pair of confidential value and confidential asset
+    given key, nonce, committed script, and rangeproof.
+    returns a tuple of (success, result)
+    If success is True, result is UnblindConfidentialPairResult namedtuple.
+    If success is False, result is a string describing the cause of failure"""
     assert isinstance(key, CKeyMixin)
     assert isinstance(confValue, CConfidentialValue)
     assert isinstance(confAsset, CConfidentialAsset)
@@ -1543,14 +1570,14 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
     # so no key.is_valid check needed
 
     if len(rangeproof) == 0:
-        return None
+        return False, 'rangeproof is empty'
 
     ephemeral_key = CPubKey(nNonce.commitment)
 
     # ECDH or not depending on if nonce commitment is non-empty
     if len(nNonce.commitment) > 0:
         if not ephemeral_key.is_fullyvalid:
-            return None
+            return False, 'nNonce.commitment is not a valid pubkey'
         nonce = hashlib.sha256(key.ECDH(ephemeral_key)).digest()
     else:
         # Use blinding key directly, and don't commit to a scriptpubkey
@@ -1565,7 +1592,7 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
 
     # If value is unblinded, we don't support unblinding just the asset
     if not confValue.is_commitment():
-        return None
+        return False, 'value is not a commitment'
 
     observed_gen = ctypes.create_string_buffer(64)
     # Valid asset commitment?
@@ -1574,13 +1601,13 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
             secp256k1_blind_context, observed_gen, confAsset.commitment)
         if res != 1:
             assert res == 0
-            return None
+            return False, 'cannot parse asset commitment as a generator'
     elif confAsset.is_explicit():
         res = secp256k1.secp256k1_generator_generate(
             secp256k1_blind_context, observed_gen, confAsset.to_asset().data)
         if res != 1:
             assert res == 0
-            return None
+            return False, ('unable to create a generator out of asset explicit data')
 
     commit = ctypes.create_string_buffer(64)
     # Valid value commitment ?
@@ -1588,7 +1615,7 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
                                                         commit, confValue.commitment)
     if res != 1:
         assert res == 0
-        return None
+        return False, 'cannot parse value commitment as Pedersen commitment'
 
     blinding_factor_out = ctypes.create_string_buffer(32)
 
@@ -1608,15 +1635,15 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
         observed_gen)
 
     if 0 == res:
-        return None
+        return False, 'unable to rewind rangeproof'
 
     assert res == 1
 
     if not MoneyRange(amount.value):
-        return None
+        return False, 'resulting amount after rangeproof rewind is outside MoneyRange'
 
     if msg_size.value != 64:
-        return None
+        return False, 'resulting message after rangeproof rewind is not 64 bytes in size'
 
     asset_type = msg
     asset_blinder = msg[32:]
@@ -1625,7 +1652,8 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
         secp256k1_blind_context, recalculated_gen, asset_type, asset_blinder)
     if res != 1:
         assert res == 0
-        return None
+        return False, ('unable to recalculate a generator from asset type and asset blinder '
+                       'resulted from rangeproof rewind')
 
     # Serialize both generators then compare
 
@@ -1640,9 +1668,10 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
     assert res == 1
 
     if observed_generator.raw != derived_generator.raw:
-        return None
+        return False, ('generator recalculated after rangeproof rewind '
+                       'does not match generator presented in asset commitment')
 
-    return UnblindConfidentialPairResult(
+    return True, UnblindConfidentialPairResult(
         amount=amount.value, blinding_factor=Uint256(blinding_factor_out.raw),
         asset=CAsset(asset_type[:32]), asset_blinding_factor=Uint256(msg[32:64]))
 
@@ -1656,8 +1685,8 @@ def derive_blinding_key(blinding_derivation_key, script):
 ZKPRangeproofInfo = namedtuple('ZKPRangeproofInfo', 'exp mantissa value_min value_max')
 UnblindConfidentialPairResult = namedtuple('UnblindConfidentialPairResult',
                                            'amount blinding_factor asset asset_blinding_factor')
-BlindResult = namedtuple('BlindResult',
-                         'num_successfully_blinded, blinding_factors, asset_blinding_factors')
+BlindingResult = namedtuple('BlindingResult',
+                            'num_successfully_blinded, blinding_factors, asset_blinding_factors')
 
 
 def get_chain_params(name):
