@@ -58,7 +58,7 @@ AtomicSwapOffer = namedtuple('AtomicSwapOffer', 'asset amount')
 # and not clutter the participant process funcs with unneeded details
 console_lock = None
 
-# Node functions need to know the asset that the fee is paid in.
+# Participant functions need to know the asset that the fee is paid in.
 # It will be specified on the command line when the example is run.
 fee_asset = None
 
@@ -398,11 +398,11 @@ def alice(say, recv, send, die, rpc):
     ]
     send('offer', my_offers)
 
-    bob_offer = recv('counter-offer')
+    bob_offer = recv('offer')
 
     print_asset_balances(say, my_offers + [bob_offer], rpc)
 
-    say('Bob responded with counter-offer: {}'.format(bob_offer))
+    say('Bob responded with his offer: {}'.format(bob_offer))
 
     # We unconditionally accept Bob's offer - his asset is
     # equally worthless as ours :-)
@@ -410,7 +410,7 @@ def alice(say, recv, send, die, rpc):
     # Generate an address for Bob to send his asset to.
     addr_str, blinding_key = get_dst_addr(say, rpc)
 
-    say('Sending my address and assetcommitment for my UTXO to Bob')
+    say('Sending my address and assetcommitments for my UTXOs to Bob')
     # Send Bob our address, and the assetcommitments of our UTXOs
     # (but not any other information about our UTXO),
     # so he can construct and blind a partial transaction that
@@ -460,7 +460,7 @@ def alice(say, recv, send, die, rpc):
     say("Bob's addresses to receive my assets: {}".format(bob_addr_list))
 
     # Convert Bob's addresses to address objects.
-    # If Bob passes invalid address, we die with we die with exception.
+    # If Bob passes invalid address, we die with with exception.
     bob_addr_list = [CBitcoinAddress(a) for a in bob_addr_list]
 
     # Add our own inputs and outputs to Bob's partial tx
@@ -586,7 +586,7 @@ def alice(say, recv, send, die, rpc):
         # We specify input_index as 1+n because we skip first (Bob's) input
         sign_input(tx, 1+n, btc_to_satoshi(utxo['amount']), utxo['key'])
 
-    say('Signed our inputs, sending partially-signed transaction to Bob')
+    say('Signed my inputs, sending partially-signed transaction to Bob')
 
     send('partially_signed_tx', tx.serialize())
 
@@ -636,12 +636,12 @@ def bob(say, recv, send, die, rpc):
     # We unconditionally accept Alice's offer - her assets are
     # equally worthless as our asset :-)
 
-    say("Alice's offers are {}, sending my counter-offer".format(alice_offers))
+    say("Alice's offers are {}, sending my offer".format(alice_offers))
 
     my_offer = AtomicSwapOffer(amount=btc_to_satoshi(asset_utxo['amount']),
                                asset=asset_str)
 
-    send('counter-offer', my_offer)
+    send('offer', my_offer)
 
     say('Waiting for Alice\'s address and assetcommitments')
 
