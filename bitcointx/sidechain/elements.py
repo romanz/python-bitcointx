@@ -212,6 +212,18 @@ class CAsset(Uint256):
     def __repr__(self):
         return "CAsset('{}')".format(self.to_hex())
 
+    def to_commitment(self):
+        gen = ctypes.create_string_buffer(64)
+        res = secp256k1.secp256k1_generator_generate(
+            secp256k1_blind_context, gen, self.data)
+        if res != 1:
+            raise ValueError('invalid asset data')
+        result_commitment = ctypes.create_string_buffer(CConfidentialAsset._committedSize)
+        ret = secp256k1.secp256k1_generator_serialize(
+            secp256k1_blind_context, result_commitment, gen)
+        assert ret == 1
+        return result_commitment.raw
+
 
 class CConfidentialAsset(CConfidentialCommitmentBase):
     _explicitSize = 33
