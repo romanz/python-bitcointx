@@ -421,9 +421,9 @@ def alice(say, recv, send, die, rpc):
 
     send('addr_and_assetcommitments', (addr_str, assetcommitments))
 
-    partial_tx_bytes = recv('partially_blinded_tx')
+    partial_tx_bytes = recv('partial_blinded_tx')
 
-    say('Got partially blinded tx of size {} bytes from Bob'
+    say('Got partial blinded tx of size {} bytes from Bob'
         .format(len(partial_tx_bytes)))
 
     partial_tx = CTransaction.deserialize(partial_tx_bytes)
@@ -706,7 +706,7 @@ def bob(say, recv, send, die, rpc):
 
     say('Successfully blinded partial transaction, sending it to Alice')
 
-    send('partially_blinded_tx', partial_tx.serialize())
+    send('partial_blinded_tx', partial_tx.serialize())
 
     say("Generating addresses to receive Alice's assets")
     # Generate as many destination addresses as there are assets
