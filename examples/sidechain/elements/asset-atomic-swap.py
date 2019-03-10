@@ -101,7 +101,7 @@ def main():
 
     try:
         fee_asset = CAsset(lx(sys.argv[3]))
-    except Exception as e:
+    except ValueError as e:
         sys.stderr.write('specified fee asset is not valid: {}'.format(e))
         sys.exit(-1)
 
@@ -155,11 +155,17 @@ def participant(func, name, pipe, config_path):
 
     def say(msg): participant_says(name, msg)
 
+    # Custom exception class to distinguish a case when
+    # participant calss die() from other exceptions
+    class ProtocolFailure(Exception):
+        ...
+
+    def die(msg): raise ProtocolFailure(msg)
+
     def recv(expected_type):
         timeout = 60
         if not pipe.poll(timeout):
-            raise Exception('No messages received in {} seconds'
-                            .format(timeout))
+            die('No messages received in {} seconds'.format(timeout))
         msg = pipe.recv()
 
         if msg[0] == 'bye!':
@@ -167,19 +173,12 @@ def participant(func, name, pipe, config_path):
             sys.exit(-1)
 
         if msg[0] != expected_type:
-            raise Exception("unexpected message type '{}', expected '{}'"
-                            .format(msg[0], expected_type))
+            die("unexpected message type '{}', expected '{}'"
+                .format(msg[0], expected_type))
 
         return msg[1]
 
     def send(msg_type, data=None): pipe.send([msg_type, data])
-
-    # Custom exception class to distinguish a case when
-    # participant calss die() from other exceptions
-    class ProtocolFailure(Exception):
-        ...
-
-    def die(msg): raise ProtocolFailure(msg)
 
     # Ignore keyboard interrupt, parent process handles it.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -227,7 +226,7 @@ def connect_rpc(say, config_path):
     return RawProxy(btc_conf_file=config_path)
 
 
-def wait_confirm(say, txid, rpc):
+def wait_confirm(say, txid, die, rpc):
     """Wait for particular transaction to be confirmed.
     generate test blocks if it is in mempool, but not confirmed.
     raise Exception if not confirmed in 60 seconds"""
@@ -245,7 +244,7 @@ def wait_confirm(say, txid, rpc):
                 pass
         time.sleep(1)
 
-    raise Exception('timed out waiting for confirmation')
+    die('timed out waiting for confirmation')
 
 
 def issue_asset(say, asset_amount, rpc):
@@ -383,9 +382,9 @@ def alice(say, recv, send, die, rpc):
 
     # Make sure asset issuance transactions are confirmed
     rpc.generate(1)
-    wait_confirm(say, asset1_utxo['txid'], rpc)
-    wait_confirm(say, asset2_utxo['txid'], rpc)
-    wait_confirm(say, bob_txid, rpc)
+    wait_confirm(say, asset1_utxo['txid'], die, rpc)
+    wait_confirm(say, asset2_utxo['txid'], die, rpc)
+    wait_confirm(say, bob_txid, die, rpc)
 
     # Make sure Bob is alive and ready to communicate, and send
     # him an offer for two assets
@@ -576,8 +575,8 @@ def alice(say, recv, send, die, rpc):
 
     # And must blind exactly three outputs (two to Bob, one fee asset change)
     if blind_result.num_successfully_blinded != 3:
-        raise Exception('blinded {} outputs, expected to be 3'
-                        .format(blind_result.num_successfully_blinded))
+        die('blinded {} outputs, expected to be 3'
+            .format(blind_result.num_successfully_blinded))
 
     say('Successfully blinded the combined transaction, will now sign')
 
@@ -595,7 +594,7 @@ def alice(say, recv, send, die, rpc):
 
     # Make sure it is confirmed
     rpc.generate(1)
-    wait_confirm(say, txid, rpc)
+    wait_confirm(say, txid, die, rpc)
 
     # Check that everything went smoothly
     balance = btc_to_satoshi(rpc.getbalance("*", 1, False, bob_offer.asset))
@@ -701,8 +700,8 @@ def bob(say, recv, send, die, rpc):
 
     # And must blind exactly one output
     if blind_result.num_successfully_blinded != 1:
-        raise Exception('blinded {} outputs, expected to be 1'
-                        .format(blind_result.num_successfully_blinded))
+        die('blinded {} outputs, expected to be 1'
+            .format(blind_result.num_successfully_blinded))
 
     say('Successfully blinded partial transaction, sending it to Alice')
 
