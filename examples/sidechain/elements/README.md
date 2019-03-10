@@ -1,10 +1,14 @@
 XXX Work in progress
 
-This directory contains two example programs that demonstrate usage of Elements sidechain confidential transaction blinding and unblinding functionality of python-bitcointx.
+This directory contains three example programs that demonstrate usage of Elements sidechain confidential transaction blinding and unblinding functionality of python-bitcointx.
 
-unblind.py takes hex-encoded transaction and blinding key, and successively tries to unblind the outputs of this transaction with the given blinding key.
+`unblind.py` takes hex-encoded transaction and blinding key, and successively tries to unblind the outputs of this transaction with the given blinding key.
 
-spend-to-confidential-address.py takes hex-encoded transaction, spending key, unblinding key, and a destination address, and prints new hex-encoded transaction tha spends the output of the input transaction corresponding to the spending key. If this output is blinded, it then uses provided unblinding key to unblind this output. If the destination address provided is a confidential address, the code will blind the resulting transaction before signing it with spending key.
+`spend-to-confidential-address.py` takes hex-encoded transaction, spending key, unblinding key, and a destination address, and prints new hex-encoded transaction tha spends the output of the input transaction corresponding to the spending key. If this output is blinded, it then uses provided unblinding key to unblind this output. If the destination address provided is a confidential address, the code will blind the resulting transaction before signing it with spending key.
+
+`asset-atomic-swap.py` works with two regtest Elements Core daemons, set up according to https://elementsproject.org/elements-code-tutorial/blockchain and uses their RPC to issue assets and other actions needed to demonstrate asset atomic swap. It features two participants: Alice and Bob, who issue new assets, and then atomically swap them by exchanging partially-constructed, blinded transactions, building a final transaction ouf of the exchanged parts, cooperatively signing and then broadcasting the transaction. Atomicity in this swap comes from the fact that both Alice and Bob use `SIGHASH_ALL` type of signature hash - this means that both Alice's and Bob's signatures cover all of the inputs and outputs of a transaction, and no participant can alter the agreed upon transaction structure without invalidating the other participant signature.
+
+The command examples here assume the shell environment is set up as described in https://elementsproject.org/elements-code-tutorial/confidential-transactions
 
 
     secp256k1-zkp:
