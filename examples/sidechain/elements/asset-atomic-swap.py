@@ -184,7 +184,9 @@ def participant(func, name, pipe, config_path):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     try:
+        # Connect to Elements Core RPC with specified path
         rpc = connect_rpc(say, config_path)
+        # Execute participant's function
         func(say, recv, send, die, rpc)
     except Exception as e:
         say('FAIL with {}: {}'.format(type(e).__name__, e))
