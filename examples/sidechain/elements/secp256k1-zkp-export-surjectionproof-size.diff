@@ -1,0 +1,41 @@
+commit d8babd70bc9c67072d6af8382fb8e681e760115e
+Author: Dmitry Petukhov <dp@simplexum.com>
+Date:   Tue Dec 25 00:29:28 2018 +0500
+
+    export SECP256K1_SURJECTIONPROOF_RAW_SIZE
+
+diff --git a/include/secp256k1_surjectionproof.h b/include/secp256k1_surjectionproof.h
+index 38f6799..8c5c549 100644
+--- a/include/secp256k1_surjectionproof.h
++++ b/include/secp256k1_surjectionproof.h
+@@ -33,6 +33,11 @@ extern "C" {
+  *  and secp256k1_surjectionproof_serialize to encode/decode proofs into a
+  *  well-defined format.
+  *
++ *  If you need to allocate new secp256k1_surjectionproof structure
++ *  for use with secp256k1_surjectionproof_initialize, you should allocate
++ *  a buffer of size SECP256K1_SURJECTIONPROOF_RAW_SIZE, and then treat the
++ *  data in this buffer as opaque data, as described above.
++ *
+  *  The representation is exposed to allow creation of these objects on the
+  *  stack; please *do not* use these internals directly.
+  */
+@@ -49,6 +54,8 @@ typedef struct {
+     unsigned char data[32 * (1 + SECP256K1_SURJECTIONPROOF_MAX_N_INPUTS)];
+ } secp256k1_surjectionproof;
+ 
++SECP256K1_API const int SECP256K1_SURJECTIONPROOF_RAW_SIZE;
++
+ /** Parse a surjection proof
+  *
+  *  Returns: 1 when the proof could be parsed, 0 otherwise.
+diff --git a/src/secp256k1.c b/src/secp256k1.c
+index a3f6726..d5700f5 100644
+--- a/src/secp256k1.c
++++ b/src/secp256k1.c
+@@ -661,4 +661,5 @@ int secp256k1_ec_pubkey_combine(const secp256k1_context* ctx, secp256k1_pubkey *
+ 
+ #ifdef ENABLE_MODULE_SURJECTIONPROOF
+ # include "modules/surjection/main_impl.h"
++const int SECP256K1_SURJECTIONPROOF_RAW_SIZE = sizeof(secp256k1_surjectionproof);
+ #endif
