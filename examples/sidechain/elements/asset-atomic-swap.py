@@ -96,7 +96,7 @@ def main():
     if not os.path.isfile(elements_config_path2):
         sys.stderr.write(
             'config file {} not found or is not a regular file'
-            .format(elements_config_path1))
+            .format(elements_config_path2))
         sys.exit(-1)
 
     try:
