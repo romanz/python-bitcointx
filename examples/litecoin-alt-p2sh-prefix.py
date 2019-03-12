@@ -18,8 +18,6 @@ from bitcointx.wallet import CBitcoinAddress
 
 class CoreLitecoinParams(CoreMainParams):
     NAME = 'litecoin-mainnet'
-    SUBSIDY_HALVING_INTERVAL = 840000
-    PROOF_OF_WORK_LIMIT = 2**256-1 >> 20
     MAX_MONEY = 84000000 * COIN
 
 
