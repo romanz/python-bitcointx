@@ -639,8 +639,7 @@ def bob(say, recv, send, die, rpc):
 
     say("Alice's offers are {}, sending my offer".format(alice_offers))
 
-    my_offer = AtomicSwapOffer(amount=btc_to_satoshi(asset_utxo['amount']),
-                               asset=asset_str)
+    my_offer = AtomicSwapOffer(amount=asset_amount_satoshi, asset=asset_str)
 
     send('offer', my_offer)
 
