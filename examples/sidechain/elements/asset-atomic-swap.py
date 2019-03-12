@@ -591,6 +591,13 @@ def alice(say, recv, send, die, rpc):
 
     send('partially_signed_tx', tx.serialize())
 
+    # Note that at this point both participants can still opt out of the swap:
+    # Alice by double-spending her inputs to the transaction,
+    # and Bob by not signing or not broadcasting the transaction.
+    # Bob still have tiny advantage, because
+    # he can pretend to have 'difficulties' in broadcasting and try to exploit
+    # Alice's patience
+
     # Get the swap transaction txid from Bob
     txid = recv('wait-txid-confirm')
 
@@ -771,6 +778,12 @@ def bob(say, recv, send, die, rpc):
 
     # Our input is at index 0
     sign_input(tx, 0, btc_to_satoshi(asset_utxo['amount']), asset_utxo['key'])
+
+    # Note that at this point both participants can still opt out of the swap:
+    # Bob by not broadcasting the transaction, and Alice by double-spending
+    # her inputs to the transaction. Bob still have tiny advantage, because
+    # he can pretend to have 'difficulties' in broadcasting and try to exploit
+    # Alice's patience
 
     say('Signed the transaction from my side, sending')
 
