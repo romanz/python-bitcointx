@@ -5,16 +5,54 @@
 * Elements sidechain support:
 
     Confidential addresses
+    Confidential transactions:
+        serialization/deserialization
+        blinding/unblinding
 
-    Confidential transaction serialization/deserialization
+    Note that at the time of writing this, the functionality
+    required to blind and unblind transactions are only present
+    in experimental version of secp256k1-zkp library, that also
+    requires a patch to be interoperable with python-bitcointx.
+    The procedure to build this library and patch it is described
+    in the README file of Elements sidechain examplees.
+
+    Serialization and deserialization for Elements sidechain
+    transactions does not depend on secp256k1-zkp.
+
+    See examples in examples/sidechain/elements/
+
+* Core transaction class and accompanying transaction component classes
+  are now only a front-ends to implementation-specific classes.
+  When you create CTransaction, for example, you will get an instance
+  of CBitcoinTransaction if default chain parameters are in effect,
+  or CElementsSidechainTransaction, if you have choosen Elements
+  sidechain parameters. Same with CTxIn, CTxWitness, and other
+  transaction component classes, and also CScript. This allows to support
+  different (Bitcoin-based) transaction formats and various
+  blockchain-specific functionality while the basic code that is not
+  affected by the differences between specifications still can work
+  unmodified. If you need to check for transaction component class types
+  with isinstance, you can use CTransactionBase, CTxInBase, etc.
 
 * CTxWitness now is immutable, CMutableTxWitness is added.
+
+* More consistent mutable/immutable transaction component class handling.
+  Creating CMutableTransaction and specifying CTxIn for inputs will result
+  in CMutableTransaction instance that have CMutableTxIn in their inputs
+  (Actually, CBitcoinMutableTxIn or CElementsSidechainMutableTxIn)
 
 * Default transaction nVersion is now 2 (the same as in current Bitcoin Core)
 
 * CPubKey() can be instantiated without parameters (will return invalid pubkey instance)
 
-* A lot of refactoring and cleanup
+* CBlock, CBlockHeader and all related code is removed
+
+* repr() and str() can return different representations for CTransaction contents.
+  For example, CConfidentialAsset of Elements sidechain will render as
+  CConfidentialAsset(CONFIDENTIAL) when rendered with str,
+  but will show the bytes of the commitment when rendered with repr
+
+* Refactoring and cleanup
 
 ## v0.10.3.post0
 
