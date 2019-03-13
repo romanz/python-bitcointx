@@ -39,7 +39,8 @@ from bitcointx.core.script import (
     SIGHASH_ALL, SIGVERSION_BASE
 )
 from bitcointx.sidechain.elements import (
-    CConfidentialValue, CConfidentialAsset, CConfidentialAddress
+    CConfidentialValue, CConfidentialAsset, CConfidentialAddress,
+    BlindingInputDescriptor
 )
 
 
@@ -191,10 +192,14 @@ if __name__ == '__main__':
     # output_pubkeys may contain 2 or 3 elements
     # (3 if we added dummy OP_RETURN above)
     ok, blind_result = tx.blind(
-        input_blinding_factors=[blinding_factor],
-        input_asset_blinding_factors=[asset_blinding_factor],
-        input_assets=[asset_to_spend],
-        input_amounts=[amount_to_spend],
+        input_descriptors=[
+            BlindingInputDescriptor(
+                asset=asset_to_spend,
+                amount=amount_to_spend,
+                blinding_factor=blinding_factor,
+                asset_blinding_factor=asset_blinding_factor
+            )
+        ],
         output_pubkeys=output_pubkeys)
 
     if not ok:

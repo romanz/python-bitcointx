@@ -704,7 +704,7 @@ class CElementsSidechainTxOut(CTxOutBase, ReprOrStrMixin):
     def unblind(self, blinding_key=None, rangeproof=None):
         """Unblinds a txout, given a key and a rangeproof.
         returns a tuple of (success, result)
-        If success is True, result is UnblindConfidentialPairResult namedtuple.
+        If success is True, result is BlindingInputDescriptor namedtuple.
         If success is False, result is a string describing the cause of failure"""
         return unblind_confidential_pair(
             blinding_key, self.nValue, self.nAsset, self.nNonce,
@@ -810,9 +810,8 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
     _txin_class = CElementsSidechainMutableTxIn
     _txout_class = CElementsSidechainMutableTxOut
 
-    def blind(self, input_blinding_factors=(), input_asset_blinding_factors=(),
-              input_assets=(), input_amounts=(),
-              output_pubkeys=(), blind_issuance_asset_keys=(), blind_issuance_token_keys=(),
+    def blind(self, input_descriptors=(), output_pubkeys=(),
+              blind_issuance_asset_keys=(), blind_issuance_token_keys=(),
               auxiliary_generators=(), _rand_func=os.urandom):
 
         """Blinds the transaction. Return a tuple of (sucess, result).
@@ -830,13 +829,12 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
         assert all(k is None or isinstance(k, CKey) for k in blind_issuance_asset_keys)
         assert len(self.vin) + self.num_issuances >= len(blind_issuance_token_keys)
         assert all(k is None or isinstance(k, CKey) for k in blind_issuance_token_keys)
-        assert len(self.vin) == len(input_blinding_factors)
-        assert all(isinstance(bf, Uint256) for bf in input_blinding_factors)
-        assert len(self.vin) == len(input_asset_blinding_factors)
-        assert all(isinstance(abf, Uint256) for abf in input_asset_blinding_factors)
-        assert len(self.vin) == len(input_assets)
-        assert all(isinstance(a, CAsset) for a in input_assets)
-        assert len(self.vin) == len(input_amounts)
+        assert len(self.vin) == len(input_descriptors)
+        for idesc in input_descriptors:
+            assert isinstance(idesc.blinding_factor, Uint256)
+            assert isinstance(idesc.asset_blinding_factor, Uint256)
+            assert isinstance(idesc.asset, CAsset)
+            assert isinstance(idesc.amount, int)
 
         output_blinding_factors = [None for _ in range(len(self.vout))]
         output_asset_blinding_factors = [None for _ in range(len(self.vout))]
@@ -894,7 +892,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
 
         for i in range(len(self.vin)):
             # For each input we either need the asset/blinds or the generator
-            if input_assets[i].is_null():
+            if input_descriptors[i].asset.is_null():
                 # If non-empty generator exists, parse
                 if auxiliary_generators:
                     # Parse generator here
@@ -911,12 +909,13 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                 asset_generator = ctypes.create_string_buffer(SECP256K1_GENERATOR_SIZE)
                 ret = secp256k1.secp256k1_generator_generate_blinded(
                     secp256k1_blind_context, asset_generator,
-                    input_assets[i].data, input_asset_blinding_factors[i].data)
+                    input_descriptors[i].asset.data,
+                    input_descriptors[i].asset_blinding_factor.data)
                 assert ret == 1
 
             targetAssetGenerators[totalTargets] = asset_generator.raw
-            surjectionTargets[totalTargets] = input_assets[i]
-            targetAssetBlinders.append(input_asset_blinding_factors[i])
+            surjectionTargets[totalTargets] = input_descriptors[i].asset
+            targetAssetBlinders.append(input_descriptors[i].asset_blinding_factor)
             totalTargets += 1
 
             # Create target generators for issuances
@@ -996,16 +995,16 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
 
         for nIn in range(len(self.vin)):
             if (
-                not input_blinding_factors[nIn].is_null()
-                or not input_asset_blinding_factors[nIn].is_null()
+                not input_descriptors[nIn].blinding_factor.is_null()
+                or not input_descriptors[nIn].asset_blinding_factor.is_null()
             ):
-                if input_amounts[nIn] < 0:
+                if input_descriptors[nIn].amount < 0:
                     return False, ('input blinding factors (or asset blinding factors) '
                                    'for input %d is not empty, but amount specified for '
                                    'this input is negative' % nIn)
-                blinds.append(input_blinding_factors[nIn])
-                assetblinds.append(input_asset_blinding_factors[nIn])
-                amounts_to_blind.append(input_amounts[nIn])
+                blinds.append(input_descriptors[nIn].blinding_factor)
+                assetblinds.append(input_descriptors[nIn].asset_blinding_factor)
+                amounts_to_blind.append(input_descriptors[nIn].amount)
                 nBlindsIn += 1
 
             # Count number of issuance pseudo-inputs to blind
@@ -1580,7 +1579,7 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
     """Unblinds a pair of confidential value and confidential asset
     given key, nonce, committed script, and rangeproof.
     returns a tuple of (success, result)
-    If success is True, result is UnblindConfidentialPairResult namedtuple.
+    If success is True, result is BlindingInputDescriptor namedtuple.
     If success is False, result is a string describing the cause of failure"""
     assert isinstance(key, CKeyMixin)
     assert isinstance(confValue, CConfidentialValue)
@@ -1694,7 +1693,7 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
         return False, ('generator recalculated after rangeproof rewind '
                        'does not match generator presented in asset commitment')
 
-    return True, UnblindConfidentialPairResult(
+    return True, BlindingInputDescriptor(
         amount=amount.value, blinding_factor=Uint256(blinding_factor_out.raw),
         asset=CAsset(asset_type[:32]), asset_blinding_factor=Uint256(msg[32:64]))
 
@@ -1708,10 +1707,12 @@ def derive_blinding_key(blinding_derivation_key, script):
 
 
 ZKPRangeproofInfo = namedtuple('ZKPRangeproofInfo', 'exp mantissa value_min value_max')
-UnblindConfidentialPairResult = namedtuple('UnblindConfidentialPairResult',
-                                           'amount blinding_factor asset asset_blinding_factor')
+
 BlindingResult = namedtuple('BlindingResult',
                             'num_successfully_blinded, blinding_factors, asset_blinding_factors')
+
+BlindingInputDescriptor = namedtuple('BlindingInputDescriptor',
+                                     'asset amount blinding_factor asset_blinding_factor')
 
 
 def get_chain_params(name):
@@ -1732,4 +1733,5 @@ __all__ = (
     'CConfidentialAddress',
     'P2SHConfidentialAddress',
     'P2PKHConfidentialAddress',
+    'BlindingInputDescriptor',
 )
