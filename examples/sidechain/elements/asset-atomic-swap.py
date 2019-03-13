@@ -45,7 +45,8 @@ from bitcointx.wallet import (
     CBitcoinAddress, CBitcoinSecret, P2PKHBitcoinAddress
 )
 from bitcointx.sidechain.elements import (
-    CAsset, CConfidentialValue, CConfidentialAsset
+    CAsset, CConfidentialValue, CConfidentialAsset,
+    BlindingInputDescriptor
 )
 from collections import namedtuple
 
@@ -204,10 +205,11 @@ def alice(say, recv, send, die, rpc):
     # We have assetcommitment for the first input,
     # other data is not needed for it.
     # initialize first elements of the arrays with empty/negative data.
-    blinders = [Uint256()]
-    assetblinders = [Uint256()]
-    assets = [CAsset()]
-    amounts = [-1]
+    input_descriptors = [
+        BlindingInputDescriptor(asset=CAsset(), amount=-1,
+                                blinding_factor=Uint256(),
+                                asset_blinding_factor=Uint256())
+    ]
 
     # First output is already blinded, fill the slot with empty data
     output_pubkeys = [CPubKey()]
@@ -236,10 +238,13 @@ def alice(say, recv, send, die, rpc):
         tx.vin.append(
             CMutableTxIn(prevout=COutPoint(hash=lx(utxo['txid']),
                                            n=utxo['vout'])))
-        blinders.append(Uint256(lx(utxo['blinder'])))
-        assetblinders.append(Uint256(lx(utxo['assetblinder'])))
-        assets.append(CAsset(lx(utxo['asset'])))
-        amounts.append(btc_to_satoshi(utxo['amount']))
+        input_descriptors.append(
+            BlindingInputDescriptor(
+                asset=CAsset(lx(utxo['asset'])),
+                amount=btc_to_satoshi(utxo['amount']),
+                blinding_factor=Uint256(lx(utxo['blinder'])),
+                asset_blinding_factor=Uint256(lx(utxo['assetblinder']))))
+
         # If we are supplying asset blinders and assetblinders for
         # particular input, assetcommitment data for that input do
         # not need to be correct. But if we are supplying assetcommitments
@@ -295,13 +300,9 @@ def alice(say, recv, send, die, rpc):
     tx.wit.vtxoutwit.append(CMutableTxOutWitness())
 
     # And blind the combined transaction
-    ok, blind_result = tx.blind(
-        input_blinding_factors=blinders,
-        input_asset_blinding_factors=assetblinders,
-        input_assets=assets,
-        input_amounts=amounts,
-        output_pubkeys=output_pubkeys,
-        auxiliary_generators=assetcommitments)
+    ok, blind_result = tx.blind(input_descriptors=input_descriptors,
+                                output_pubkeys=output_pubkeys,
+                                auxiliary_generators=assetcommitments)
 
     # The blinding must succeed!
     if not ok:
@@ -457,10 +458,13 @@ def bob(say, recv, send, die, rpc):
     # to create a spending transaction.
 
     ok, blind_result = partial_tx.blind(
-        input_blinding_factors=[Uint256(lx(asset_utxo['blinder']))],
-        input_asset_blinding_factors=[Uint256(lx(asset_utxo['assetblinder']))],
-        input_assets=[CAsset(lx(asset_utxo['asset']))],
-        input_amounts=[asset_amount_satoshi],
+        input_descriptors=[
+            BlindingInputDescriptor(
+                asset=CAsset(lx(asset_utxo['asset'])),
+                amount=asset_amount_satoshi,
+                blinding_factor=Uint256(lx(asset_utxo['blinder'])),
+                asset_blinding_factor=Uint256(lx(asset_utxo['assetblinder'])))
+        ],
         output_pubkeys=[alice_addr.blinding_pubkey],
         auxiliary_generators=assetcommitments)
 
@@ -878,10 +882,7 @@ def claim_funds_back(say, utxos, die, rpc):
     # compared to the code in participant functions, so it will not be
     # commented too much.
 
-    blinders = []
-    assetblinders = []
-    assets = []
-    amounts = []
+    input_descriptors = []
     # It is better to prepare the claw-back transaction beforehand, to avoid
     # the possibility of unexpected problems arising at the critical time when
     # we need to send claw-back tx ASAP, but that would clutter the earlier
@@ -890,20 +891,24 @@ def claim_funds_back(say, utxos, die, rpc):
     for utxo in utxos:
         tx.vin.append(CTxIn(prevout=COutPoint(hash=lx(utxo['txid']),
                                               n=utxo['vout'])))
-        blinders.append(Uint256(lx(utxo['blinder'])))
-        assetblinders.append(Uint256(lx(utxo['assetblinder'])))
-        assets.append(CAsset(lx(utxo['asset'])))
-        amounts.append(btc_to_satoshi(utxo['amount']))
+        input_descriptors.append(
+            BlindingInputDescriptor(
+                asset=CAsset(lx(utxo['asset'])),
+                amount=btc_to_satoshi(utxo['amount']),
+                blinding_factor=Uint256(lx(utxo['blinder'])),
+                asset_blinding_factor=Uint256(lx(utxo['assetblinder']))
+            ))
 
     asset_amounts = {}
     # If some assets are the same, we want them to be sent to one address
-    for i, asset in enumerate(assets):
-        if asset == fee_asset:
-            amount = amounts[i] - FIXED_FEE_SATOSHI
+    for idesc in input_descriptors:
+        if idesc.asset == fee_asset:
+            amount = idesc.amount - FIXED_FEE_SATOSHI
             assert amount >= FIXED_FEE_SATOSHI  # enforced at find_utxo_for_fee
         else:
-            amount = amounts[i]
-        asset_amounts[asset] = amount
+            amount = idesc.amount
+
+        asset_amounts[idesc.asset] = amount
 
     output_pubkeys = []
     for asset, amount in asset_amounts.items():
@@ -924,12 +929,8 @@ def claim_funds_back(say, utxos, die, rpc):
     tx = tx.to_immutable().to_mutable()
 
     # And blind the combined transaction
-    ok, blind_result = tx.blind(
-        input_blinding_factors=blinders,
-        input_asset_blinding_factors=assetblinders,
-        input_assets=assets,
-        input_amounts=amounts,
-        output_pubkeys=output_pubkeys)
+    ok, blind_result = tx.blind(input_descriptors=input_descriptors,
+                                output_pubkeys=output_pubkeys)
 
     assert ok and blind_result.num_successfully_blinded == len(utxos)
 

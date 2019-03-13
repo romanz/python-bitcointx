@@ -36,7 +36,8 @@ from bitcointx.core.key import CPubKey, CKey
 from bitcointx.sidechain.elements import (
     CAsset, CConfidentialValue, CConfidentialAsset, CConfidentialNonce,
     calculate_asset, generate_asset_entropy, calculate_reissuance_token,
-    CElementsSidechainTransaction, CElementsSidechainMutableTransaction
+    CElementsSidechainTransaction, CElementsSidechainMutableTransaction,
+    BlindingInputDescriptor
 )
 from bitcointx.wallet import (
     CBitcoinAddress, CBitcoinSecret,
@@ -317,15 +318,14 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
 
     def check_blind(self, unblinded_tx, unblinded_tx_raw, blinded_tx, blinded_tx_raw, bundle,
                     blinding_derivation_key, asset_commitments=()):
-        amounts = []
-        blinders = []
-        assets = []
-        assetblinders = []
+        input_descriptors = []
         for utxo in bundle['vin_utxo']:
-            amounts.append(int(round(utxo['amount']*COIN)))
-            blinders.append(Uint256(lx(utxo['blinder'])))
-            assets.append(CAsset(lx(utxo['asset'])))
-            assetblinders.append(Uint256(lx(utxo['assetblinder'])))
+            input_descriptors.append(
+                BlindingInputDescriptor(amount=int(round(utxo['amount']*COIN)),
+                                        asset=CAsset(lx(utxo['asset'])),
+                                        blinding_factor=Uint256(lx(utxo['blinder'])),
+                                        asset_blinding_factor=Uint256(lx(utxo['assetblinder'])))
+            )
 
         num_to_blind = 0
         output_pubkeys = []
@@ -377,10 +377,7 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
         # all of the inputs of the final transaction, even if currently
         # blinded transaction template does not contain these inputs.
         blind_ok, blind_result = tx_to_blind.blind(
-            input_blinding_factors=blinders,
-            input_asset_blinding_factors=assetblinders,
-            input_assets=assets,
-            input_amounts=amounts,
+            input_descriptors=input_descriptors,
             output_pubkeys=output_pubkeys,
             blind_issuance_asset_keys=blind_issuance_asset_keys,
             blind_issuance_token_keys=blind_issuance_token_keys,
@@ -405,10 +402,7 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
             random.seed(bundle['rand_seed'])
             tx_to_blind2 = unblinded_tx.to_mutable()
             blind_ok2, blind_result2 = tx_to_blind2.blind(
-                input_blinding_factors=blinders,
-                input_asset_blinding_factors=assetblinders,
-                input_assets=assets,
-                input_amounts=amounts,
+                input_descriptors=input_descriptors,
                 output_pubkeys=output_pubkeys,
                 blind_issuance_asset_keys=blind_issuance_asset_keys,
                 blind_issuance_token_keys=blind_issuance_token_keys,
