@@ -29,6 +29,40 @@ import threading
 
 secp256k1 = ctypes.cdll.LoadLibrary(ctypes.util.find_library('secp256k1'))
 
+class LibWrapper:
+    def __init__(self, lib):
+        self.__lib = lib
+
+    def __getattr__(self, name):
+        # print(name)
+        return FuncWrapper(getattr(self.__lib, name), name)
+        return getattr(self.__lib, name)
+
+class FuncWrapper:
+    def __init__(self, func, name):
+        self.__func = func
+        self.__name = name
+
+    def __call__(self, *args, **kw):
+        print(self.__name)
+        if args:
+            # TODO: dump arguments in sensible format
+            print('\t', list(map(type, args)))
+        assert not kw
+        return self.__func(*args, **kw)
+
+    def __getattr__(self, name):
+        print(self.__func, name)
+        return getattr(self.__func, name)
+
+    def __setattr__(self, name, value):
+        if name.startswith('_FuncWrapper__'):
+            super().__setattr__(name, value)
+        else:
+            setattr(self.__func, name, value)
+
+secp256k1 = LibWrapper(secp256k1)
+
 PUBLIC_KEY_SIZE             = 65
 COMPRESSED_PUBLIC_KEY_SIZE  = 33
 SIGNATURE_SIZE              = 72

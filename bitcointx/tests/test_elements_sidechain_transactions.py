@@ -540,15 +540,19 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
                     unblinded_tx = unblinded_tx.to_immutable()
                     unblinded_tx_raw = unblinded_tx.serialize()
 
+                print('\n\n\n\n* blind')
                 self.check_blind(unblinded_tx, unblinded_tx_raw,
                                  blinded_tx, blinded_tx_raw,
                                  bundle, blinding_derivation_key)
 
+                print('\n\n\n\n* unblind')
                 self.check_unblind(unblinded_tx, unblinded_tx_raw,
                                    blinded_tx, blinded_tx_raw,
                                    bundle, blinding_derivation_key)
 
+                print('\n\n\n\n* sign')
                 self.check_sign(blinded_tx, signed_tx, bundle)
+                return
 
     def test_split_blinding_multi_sign(self):
         if not secp256k1_has_zkp:
@@ -669,3 +673,7 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
         wit = CTxWitness((CMutableTxInWitness(),), (CMutableTxOutWitness(),))
         self.assertTrue(not wit.vtxinwit[0]._immutable_restriction_lifted)
         self.assertTrue(not wit.vtxoutwit[0]._immutable_restriction_lifted)
+
+
+if __name__ == '__main__':
+    unittest.main()

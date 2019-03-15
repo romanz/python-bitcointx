@@ -1534,7 +1534,7 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
     randseed = _rand_func(32)
 
     input_index = ctypes.c_size_t()
-    proof_size = ctypes.c_int.in_dll(secp256k1, 'SECP256K1_SURJECTIONPROOF_RAW_SIZE').value
+    proof_size = 8264 #ctypes.c_int.in_dll(secp256k1, 'SECP256K1_SURJECTIONPROOF_RAW_SIZE').value
     proof = ctypes.create_string_buffer(proof_size)
 
     ret = secp256k1.secp256k1_surjectionproof_initialize(
