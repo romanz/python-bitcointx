@@ -44,12 +44,14 @@ class FuncWrapper:
         self.__name = name
 
     def __call__(self, *args, **kw):
-        print(self.__name)
+        print(f'{self.__name:40}', end='')
         if args:
             # TODO: dump arguments in sensible format
-            print('\t', list(map(type, args)))
+            print('\t', format_args(args), end='')
         assert not kw
-        return self.__func(*args, **kw)
+        result = self.__func(*args, **kw)
+        print(f'\n--> {result}')
+        return result
 
     def __getattr__(self, name):
         print(self.__func, name)
@@ -60,6 +62,19 @@ class FuncWrapper:
             super().__setattr__(name, value)
         else:
             setattr(self.__func, name, value)
+
+def format_args(args):
+    types = tuple(map(type, args))
+    return ''.join('\n\t' + format_arg(a) for a in args)
+
+def format_arg(arg):
+    if isinstance(arg, bytes):
+        return f'bytes({arg})'
+    if hasattr(arg, 'raw'):
+        return f'Array({len(arg.raw)})'
+    if hasattr(arg, '_obj'):
+        return f'Ref({arg._obj})'
+    return f'{str(arg)}'
 
 secp256k1 = LibWrapper(secp256k1)
 

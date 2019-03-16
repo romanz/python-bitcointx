@@ -15,6 +15,7 @@ import os
 import json
 import random
 import logging
+import pprint
 import unittest
 
 import bitcointx
@@ -506,39 +507,12 @@ class Test_Elements_CTransaction(ElementsSidechainTestSetupBase, unittest.TestCa
             for bundle in json.load(fd):
                 blinded_tx_raw = x(bundle['blinded']['hex'])
                 blinded_tx = CTransaction.deserialize(blinded_tx_raw)
-                self.assertEqual(blinded_tx.serialize(), blinded_tx_raw)
-                self.check_serialize_deserialize(blinded_tx, blinded_tx_raw, bundle['blinded'])
                 unblinded_tx_raw = x(bundle['unblinded']['hex'])
                 unblinded_tx = CTransaction.deserialize(unblinded_tx_raw)
 
-                self.assertEqual(unblinded_tx.serialize(), unblinded_tx_raw)
-                self.check_serialize_deserialize(unblinded_tx, unblinded_tx_raw, bundle['unblinded'])
                 signed_tx_raw = x(bundle['signed_hex'])
                 signed_tx = CTransaction.deserialize(signed_tx_raw)
-                self.assertEqual(signed_tx.serialize(), signed_tx_raw)
                 blinding_derivation_key = CKey(lx(bundle['blinding_derivation_key']))
-
-                # ensure that str and repr works
-                for f in (str, repr):
-                    f(unblinded_tx)
-                    f(blinded_tx)
-                    f(signed_tx)
-
-                if len(blinded_tx.vout) != len(unblinded_tx.vout):
-                    assert len(blinded_tx.vout) == len(unblinded_tx.vout) + 1
-                    assert blinded_tx.vout[-1].scriptPubKey == b'\x6a',\
-                        "expected last output of blinded tx to be OP_RETURN"
-                    scriptPubKey = CScript([OP_RETURN])
-                    unblinded_tx = unblinded_tx.to_mutable()
-                    unblinded_tx.vout.append(
-                        CMutableTxOut(
-                            nValue=CConfidentialValue(0),
-                            nAsset=CConfidentialAsset(unblinded_tx.vout[-1].nAsset.to_asset()),
-                            nNonce=CConfidentialNonce(
-                                scriptPubKey.derive_blinding_key(blinding_derivation_key).pub),
-                            scriptPubKey=scriptPubKey))
-                    unblinded_tx = unblinded_tx.to_immutable()
-                    unblinded_tx_raw = unblinded_tx.serialize()
 
                 print('\n\n\n\n* blind')
                 self.check_blind(unblinded_tx, unblinded_tx_raw,
