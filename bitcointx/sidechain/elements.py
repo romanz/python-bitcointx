@@ -108,7 +108,7 @@ class CConfidentialAddress(CBase58BitcoinAddress):
             assert isinstance(unconfidential_adr, str)
             unconfidential_adr = CBase58BitcoinAddress(unconfidential_adr)
 
-        if len(cls.base58_prefix) > 1 and unconfidential_adr.prefix != cls.base58_prefix[1:]:
+        if len(cls.base58_prefix) > 1 and unconfidential_adr.base58_prefix != cls.base58_prefix[1:]:
             raise CBitcoinAddressError('cannot create {} from {}: inner prefix mismatch'
                                        .format(cls, unconfidential_adr.__class__.__name__))
 
