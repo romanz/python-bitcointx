@@ -35,7 +35,7 @@ class LibWrapper:
 
     def __getattr__(self, name):
         # print(name)
-        return FuncWrapper(getattr(self.__lib, name), name)
+        # return FuncWrapper(getattr(self.__lib, name), name)
         return getattr(self.__lib, name)
 
 class FuncWrapper:
