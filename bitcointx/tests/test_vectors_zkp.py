@@ -10,6 +10,7 @@ from bitcointx.core.secp256k1 import (
 
 from bitcointx.sidechain import elements
 from bitcointx.core.key import CKey, CPubKey
+from bitcointx.core import Uint256
 
 genH = bytes(bytearray([
     0x50, 0x92, 0x9b, 0x74, 0xc1, 0xa0, 0x49, 0x54, 0xb7, 0x8b, 0x4b, 0x60, 0x35, 0xe9, 0x7a, 0x5e,
@@ -19,6 +20,11 @@ genH = bytes(bytearray([
 ]))
 
 def test_blinding():
+    asset = elements.CAsset(bytes.fromhex('230f4f5d4b7c6fa845806ee4f67713459e1b69e8e60fcee2e4940c7a0d5de1b2'))
+    asset_blind = Uint256(bytes.fromhex('b07670eb940bd5335f973daad8619b91ffc911f57cced458bbbf2ce03753c9bd'))
+    (confAsset, genBytes) = elements.blind_asset(asset, asset_blind)
+    assert confAsset.commitment == bytes.fromhex('0a706c19c4b7698acfb620a8966d5c256b938c100f8e885e57e21e8c3761916853')
+
     pubkey = bytes.fromhex('03bbe24b33e3caae9d11eb5df19c4038e5edc350fbfdbb449a6094407a668f833d')
     ephemeral_privkey = b'\xEE'*32
     ephemeral_key = CKey.from_secret_bytes(ephemeral_privkey)
