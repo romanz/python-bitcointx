@@ -1206,6 +1206,9 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     _immutable_check_hash = hashlib.sha256(b''.join(b.data for b in blinds)).digest()
 
                     # Generate value we intend to insert
+                    print(f'amounts_to_blind : {amounts_to_blind[:]}')
+                    print(f'blinds : {blinds[:]}')
+                    print(f'assetblinds : {assetblinds[:]}')
                     ret = secp256k1.secp256k1_pedersen_blind_generator_blind_sum(
                         secp256k1_blind_context,
                         blindedAmounts, assetblindptrs, blindptrs,
@@ -1241,13 +1244,21 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                 output_blinding_factors[nOut] = blinds[-1]
                 output_asset_blinding_factors[nOut] = assetblinds[-1]
 
+                print('-' * 80)
+                print(f'asset       : {asset.data.hex()}')
+                print(f'assetblind  : {assetblinds[-1].data.hex()}')
+
                 # Blind the asset ID
                 (confAsset, gen) = blind_asset(asset, assetblinds[-1])
+                print(f'gen         : {gen.hex()}')
 
                 out.nAsset = confAsset
 
                 # Create value commitment
+                print(f'amount      : {amount}')
+                print(f'amountblind : {blinds[-1].data.hex()}')
                 (confValue, commit) = create_value_commitment(blinds[-1].data, gen, amount)
+                print(f'confValue   : {confValue.commitment.hex()}')
 
                 out.nValue = confValue
 
@@ -1259,6 +1270,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                 # Generate rangeproof
                 txoutwit.rangeproof = generate_rangeproof(
                     blinds, nonce, amount, out.scriptPubKey, commit, gen, asset, assetblinds)
+                print(f'rangeproof : {txoutwit.rangeproof.hex()}')
 
                 # Create surjection proof for this output
                 if not surject_output(txoutwit, surjectionTargets, targetAssetGenerators,
@@ -1495,6 +1507,13 @@ def generate_rangeproof(in_blinds, nonce, amount, scriptPubKey, commit, gen, ass
     ct_bits = min(max(CoreElementsSidechainParams.ct_bits, 1), 51)
     # Sign rangeproof
     # If min_value is 0, scriptPubKey must be unspendable
+    print(f'unspendable : {scriptPubKey.is_unspendable()}')
+    print(f'ct_exponent : {ct_exponent}')
+    print(f'ct_bits     : {ct_bits}')
+    print(f'amount      : {amount}')
+    print(f'message     : {assetsMessage.hex()}')
+    print(f'pubKey      : {scriptPubKey.hex()}')
+
     res = secp256k1.secp256k1_rangeproof_sign(
         secp256k1_blind_context,
         rangeproof, ctypes.byref(nRangeProofLen),
@@ -1514,11 +1533,15 @@ def generate_rangeproof(in_blinds, nonce, amount, scriptPubKey, commit, gen, ass
 def generate_output_rangeproof_nonce(output_pubkey, _rand_func=os.urandom):
     # Generate ephemeral key for ECDH nonce generation
     ephemeral_key = CKey.from_secret_bytes(_rand_func(32))
+    print(f'ECDH seckey: {ephemeral_key.hex()}')
+    print(f'peer pubkey: {output_pubkey.hex()}')
     ephemeral_pubkey = ephemeral_key.pub
     assert len(ephemeral_pubkey) == CConfidentialNonce._committedSize
     # Generate nonce
     nonce = ephemeral_key.ECDH(output_pubkey)
     nonce = Uint256(hashlib.sha256(nonce).digest())
+    print(f'ECDH nonce : {nonce.data.hex()}')
+    print(f'our pubkey : {ephemeral_pubkey.hex()}')
     return nonce, ephemeral_pubkey
 
 
