@@ -1208,6 +1208,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     # Generate value we intend to insert
                     print(f'amounts_to_blind : {amounts_to_blind[:]}')
                     print(f'blinds : {blinds[:]}')
+                    print(f'last_blind: {last_blind.value.hex()}')
                     print(f'assetblinds : {assetblinds[:]}')
                     ret = secp256k1.secp256k1_pedersen_blind_generator_blind_sum(
                         secp256k1_blind_context,
@@ -1222,6 +1223,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                          "blinding factors other than the last one. Failing this assert "
                          "probably means that we supplied incorrect parameters to the function.")
 
+                    print(f'last_blind: {last_blind.value.hex()}')
                     blinds[-1] = Uint256(bytes(last_blind))
 
                     # Resulting blinding factor can sometimes be 0
@@ -1554,6 +1556,9 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
     # We could require these elements to be passed explicitly,
     # but we will try to be close to original code.
 
+    for t in surjectionTargets:
+        print(f'surj. target: {t.data.hex()}')
+    print(f'surj. asset : {asset.data.hex()}')
     nInputsToSelect = min(3, len(surjectionTargets))
     randseed = _rand_func(32)
 
@@ -1571,7 +1576,11 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
         # probably asset did not match any surjectionTargets
         return False
 
+    print(f'surj. input_index: {input_index.value}')
     ephemeral_input_tags_buf = build_aligned_data_array(targetAssetGenerators, 64)
+    for t in targetAssetGenerators:
+        print(f'surj. generator: {t.hex()}')
+    print(f'surj. gen      : {gen.hex()}')
 
     ret = secp256k1.secp256k1_surjectionproof_generate(
         secp256k1_blind_context, proof,
@@ -1595,6 +1604,7 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
     assert output_len.value == expected_output_len
 
     txoutwit.surjectionproof = serialized_proof.raw
+    print(f'surjectionproof: {txoutwit.surjectionproof.hex()} ({len(txoutwit.surjectionproof)} bytes)')
 
     return True
 
