@@ -1251,6 +1251,7 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                 # Blind the asset ID
                 (confAsset, gen) = blind_asset(asset, assetblinds[-1])
                 print(f'gen         : {gen.hex()}')
+                print(f'confAsset   : {confAsset.commitment.hex()}')
 
                 out.nAsset = confAsset
 
@@ -1617,13 +1618,17 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
     if len(rangeproof) == 0:
         return False, 'rangeproof is empty'
 
+    print('-'*80)
     ephemeral_key = CPubKey(nNonce.commitment)
+    print(f'ECDH pubkey      : {nNonce.commitment.hex()}')
 
     # ECDH or not depending on if nonce commitment is non-empty
     if len(nNonce.commitment) > 0:
         if not ephemeral_key.is_fullyvalid:
             return False, 'nNonce.commitment is not a valid pubkey'
         nonce = hashlib.sha256(key.ECDH(ephemeral_key)).digest()
+        print(f'ECDH privkey     : {key.hex()}')
+        print(f'ECDH nonce       : {nonce.hex()}')
     else:
         # Use blinding key directly, and don't commit to a scriptpubkey
         committedScript = CScript()
@@ -1653,6 +1658,7 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
         if res != 1:
             assert res == 0
             return False, ('unable to create a generator out of asset explicit data')
+    print(f'generator        : {observed_gen.value.hex()}')
 
     commit = ctypes.create_string_buffer(64)
     # Valid value commitment ?
@@ -1687,6 +1693,8 @@ def unblind_confidential_pair(key, confValue, confAsset, nNonce, committedScript
     if not MoneyRange(amount.value):
         return False, 'resulting amount after rangeproof rewind is outside MoneyRange'
 
+    print(f'value            : {amount.value}')
+    print(f'msg_size         : {msg_size.value}')
     if msg_size.value != 64:
         return False, 'resulting message after rangeproof rewind is not 64 bytes in size'
 
