@@ -1555,6 +1555,10 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
 
     nInputsToSelect = min(3, len(surjectionTargets))
     randseed = _rand_func(32)
+    print(f'surj. seed: {randseed.hex()}')
+    for t in surjectionTargets:
+        print(f'surj. input asset: {t.data.hex()}')
+    print(f'surj. output asset: {asset.data.hex()}')
 
     input_index = ctypes.c_size_t()
     proof_size = 8264 #ctypes.c_int.in_dll(secp256k1, 'SECP256K1_SURJECTIONPROOF_RAW_SIZE').value
@@ -1570,6 +1574,13 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
         # probably asset did not match any surjectionTargets
         return False
 
+    print(f'surj. input_index: {input_index}')
+    for t in targetAssetGenerators:
+        print(f'surj. input generator: {t.hex()}')
+    print(f'surj. output generator: {gen.hex()}')
+
+    print(f'surj. input asset blind: {targetAssetBlinders[input_index.value].data.hex()}')
+    print(f'surj. output asset blind: {assetblinds[-1].data.hex()}')
     ephemeral_input_tags_buf = build_aligned_data_array(targetAssetGenerators, 64)
 
     ret = secp256k1.secp256k1_surjectionproof_generate(
@@ -1592,6 +1603,8 @@ def surject_output(txoutwit, surjectionTargets, targetAssetGenerators, targetAss
     secp256k1.secp256k1_surjectionproof_serialize(
         secp256k1_blind_context, serialized_proof, ctypes.byref(output_len), proof)
     assert output_len.value == expected_output_len
+    print(f'surj. proof len: {expected_output_len}')
+    print(f'surj. proof: {serialized_proof.raw.hex()}')
 
     txoutwit.surjectionproof = serialized_proof.raw
 
