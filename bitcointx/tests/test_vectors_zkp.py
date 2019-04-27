@@ -17,6 +17,7 @@ def test_blinding():
     asset_blind = Uint256(bytes.fromhex('b07670eb940bd5335f973daad8619b91ffc911f57cced458bbbf2ce03753c9bd'))
     (confAsset, genBytes) = elements.blind_asset(asset, asset_blind)
     assert confAsset.commitment == bytes.fromhex('0a706c19c4b7698acfb620a8966d5c256b938c100f8e885e57e21e8c3761916853')
+    assert genBytes == bytes.fromhex('706c19c4b7698acfb620a8966d5c256b938c100f8e885e57e21e8c37619168534f5f7de67db93506e5f424dfb23c22abb211d3a3934598d1bc62a7ace9c44513')
 
     pubkey = bytes.fromhex('03bbe24b33e3caae9d11eb5df19c4038e5edc350fbfdbb449a6094407a668f833d')
     ephemeral_privkey = b'\xEE'*32
