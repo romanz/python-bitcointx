@@ -10,7 +10,7 @@ from bitcointx.core.secp256k1 import (
 
 from bitcointx.sidechain import elements
 from bitcointx.core.key import CKey, CPubKey
-from bitcointx.core import Uint256
+from bitcointx.core import Uint256, lx
 
 def test_blinding():
     asset = elements.CAsset(bytes.fromhex('230f4f5d4b7c6fa845806ee4f67713459e1b69e8e60fcee2e4940c7a0d5de1b2'))
@@ -70,3 +70,33 @@ def test_blinding():
     # extra_commit = b"And all my grief flows from the rift / Of unremembered skies and snows."
     # ret = secp256k1_zkp.rangeproof_sign(value, commitment, blinding_factor, nonce, message, extra_commit)
     # assert ret == 1
+
+def test_balance_blinds():
+    amounts_to_blind = [2099999199946660, 2099997399936660, 1100000000]
+    blinds = [
+        lx('06d23112c6ae181b46780b243d856ed3291b00601e19e52890b90dcdce20a95f'),
+        lx('77fde0710ed86ec3040d0b0fa2347588e401ddc70ef9306bc2f1e6fd3c822044'),
+        lx('6c40981edaa4ca0f72e670dae452124acb09730add6b81378460d7afc59f0c3a')
+    ]
+    assetblinds = [
+        lx('0129eb8e1126935f1c0632aaff45537a830c4f3d5fcb0820f50ef70b9fb7eae3'),
+        lx('bdc95337e02cbfbb58d4ce7cf511c9ff919b61d8aa3d975f33d50b94eb7076b0'),
+        lx('90cda608ff97c735fc63dd6932b166c11357eb6f13044281d551989e27249c18')
+    ]
+
+    amounts_to_blind = (ctypes.c_uint64 * len(amounts_to_blind))(*amounts_to_blind)
+    assetblinds_ptrs = (ctypes.c_char_p*len(assetblinds))()
+    for i, ab in enumerate(assetblinds):
+        assetblinds_ptrs[i] = ab
+
+    blinds_ptrs = (ctypes.c_char_p*len(blinds))()
+    for i, blind in enumerate(blinds):
+        b = ctypes.create_string_buffer(blind, 32)
+        blinds_ptrs[i] = ctypes.cast(b, ctypes.c_char_p)
+
+    ret = secp256k1.secp256k1_pedersen_blind_generator_blind_sum(
+        secp256k1_blind_context,
+        amounts_to_blind, assetblinds_ptrs, blinds_ptrs,
+        3, 1)
+    assert ret
+    assert blinds_ptrs[-1][:32].hex() == '08f06eb7ebc9808370ad143542f0db3cfe27a8373efcb463f096f71c71a9c04b'

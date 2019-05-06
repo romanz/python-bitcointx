@@ -1209,6 +1209,8 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                     print(f'amounts_to_blind : {amounts_to_blind[:]}')
                     print(f'blinds : {blinds[:]}')
                     print(f'assetblinds : {assetblinds[:]}')
+                    print(f'n_total : {nBlindAttempts + nBlindsIn}')
+                    print(f'n_inputs : {nIssuanceBlindAttempts + nBlindsIn}')
                     ret = secp256k1.secp256k1_pedersen_blind_generator_blind_sum(
                         secp256k1_blind_context,
                         blindedAmounts, assetblindptrs, blindptrs,
@@ -1223,6 +1225,8 @@ class CElementsSidechainMutableTransaction(CElementsSidechainTransactionCommon, 
                          "probably means that we supplied incorrect parameters to the function.")
 
                     blinds[-1] = Uint256(bytes(last_blind))
+                    print(f'last blind : {bytes(last_blind).hex()}')
+                    print(f'last blind len : {len(last_blind)}')
 
                     # Resulting blinding factor can sometimes be 0
                     # where inputs are the negations of each other
