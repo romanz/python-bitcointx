@@ -111,6 +111,14 @@ def _set_zkp_func_types():
         ctypes.c_size_t,  # size_t n_total
         ctypes.c_size_t   # size_t n_inputs
     ]
+    secp256k1.secp256k1_pedersen_verify_tally.restype = ctypes.c_int
+    secp256k1.secp256k1_pedersen_verify_tally.argtypes = [
+        ctypes.c_void_p,  # const secp256k1_context* ctx
+        ctypes.POINTER(ctypes.c_char_p),  # const secp256k1_pedersen_commitment * const* commits,
+        ctypes.c_size_t,  # size_t pcnt,
+        ctypes.POINTER(ctypes.c_char_p),  # const secp256k1_pedersen_commitment * const* ncommits,
+        ctypes.c_size_t,  # size_t ncnt,
+    ]
     secp256k1.secp256k1_rangeproof_sign.restype = ctypes.c_int
     secp256k1.secp256k1_rangeproof_sign.argtypes = [
         ctypes.c_void_p,  # const secp256k1_context* ctx
@@ -126,6 +134,18 @@ def _set_zkp_func_types():
         ctypes.c_char_p,  # const unsigned char *message,
         ctypes.c_size_t,  # size_t msg_len,
         ctypes.c_char_p,  # const unsigned char *extra_commit,
+        ctypes.c_size_t,  # size_t extra_commit_len,
+        ctypes.c_char_p   # const secp256k1_generator* gen
+    ]
+    secp256k1.secp256k1_rangeproof_verify.restype = ctypes.c_int
+    secp256k1.secp256k1_rangeproof_verify.argtypes = [
+        ctypes.c_void_p,  # const secp256k1_context* ctx
+        ctypes.POINTER(ctypes.c_uint64),  # uint64_t *min_value
+        ctypes.POINTER(ctypes.c_uint64),  # uint64_t *max_value
+        ctypes.c_char_p,  # const secp256k1_pedersen_commitment *commit
+        ctypes.c_char_p,  # const unsigned char *proof
+        ctypes.c_size_t,  # size_t plen
+        ctypes.c_char_p,  # const unsigned char *extra_commit
         ctypes.c_size_t,  # size_t extra_commit_len,
         ctypes.c_char_p   # const secp256k1_generator* gen
     ]
@@ -194,6 +214,14 @@ def _set_zkp_func_types():
         ctypes.c_char_p,  # unsigned char *output
         ctypes.POINTER(ctypes.c_size_t),  # size_t *outputlen
         ctypes.c_char_p   # const secp256k1_surjectionproof *proof
+    ]
+
+    secp256k1.secp256k1_surjectionproof_parse.restype = ctypes.c_int
+    secp256k1.secp256k1_surjectionproof_parse.argtypes = [
+        ctypes.c_void_p,  # const secp256k1_context* ctx
+        ctypes.c_char_p,  # secp256k1_surjectionproof *proof
+        ctypes.c_char_p,  # const unsigned char *input
+        ctypes.c_size_t,  # size_t inputlen
     ]
 
 secp256k1_has_pubkey_recovery = False
